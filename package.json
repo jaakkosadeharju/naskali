@@ -14,15 +14,23 @@
     "typecheck": "tsc --noEmit",
     "dist:linux": "electron-vite build && electron-builder --linux",
     "db:up": "docker compose up -d",
-    "db:down": "docker compose down"
+    "db:down": "docker compose --profile mssql down",
+    "db:sqlite": "node scripts/make-sqlite.mjs",
+    "db:up:mssql": "docker compose --profile mssql up -d"
   },
   "dependencies": {
-    "mysql2": "^3.24.6"
+    "mssql": "^12.7.14",
+    "mysql2": "^3.24.6",
+    "pg": "^8.23.1",
+    "pg-cursor": "^2.22.1"
   },
   "devDependencies": {
     "@glideapps/glide-data-grid": "^6.0.3",
     "@monaco-editor/react": "^4.7.0",
+    "@types/mssql": "^12.3.0",
     "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/pg-cursor": "^2.7.2",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^6.3.0",

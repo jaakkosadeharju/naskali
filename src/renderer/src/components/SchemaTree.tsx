@@ -5,7 +5,8 @@ import { MOD } from './TablePalette'
 interface Props {
   schemas: SchemaInfo[]
   currentDb: string | null
-  onUseDatabase: (name: string) => void
+  /** Absent when the database can't switch schemas. */
+  onUseDatabase?: (name: string) => void
   onInsert: (text: string) => void
   onOpenTable: (schema: string, table: string, view: 'data' | 'schema') => void
   onRefresh: () => void
@@ -41,8 +42,8 @@ export function SchemaTree({ schemas, currentDb, onUseDatabase, onInsert, onOpen
               <div
                 className={`node schema ${s.name === currentDb ? 'current' : ''}`}
                 onClick={() => toggle(s.name)}
-                onDoubleClick={() => onUseDatabase(s.name)}
-                title="Double-click to USE this database"
+                onDoubleClick={() => onUseDatabase?.(s.name)}
+                title={onUseDatabase ? 'Double-click to make this the current schema' : undefined}
               >
                 <span className="twisty">{isOpen ? '▾' : '▸'}</span>🗄 {s.name}
               </div>

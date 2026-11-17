@@ -11,3 +11,32 @@ services:
       - "3306:3306"
     volumes:
       - ./docker/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+
+  postgres:
+    image: postgres:17
+    container_name: naskali-postgres
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: shop
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker/seed.postgres.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+
+  # Opt-in (npm run db:up:mssql). Running it accepts Microsoft's SQL Server EULA
+  # (Developer edition). Host port 14330, so it doesn't clash with a local SQL Server on 1433.
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: naskali-mssql
+    profiles: [mssql]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "Naskali!Dev1"
+    ports:
+      - "14330:1433"
+    entrypoint: ["/bin/bash", "/seed/mssql-entrypoint.sh"]
+    volumes:
+      - ./docker/mssql-entrypoint.sh:/seed/mssql-entrypoint.sh:ro
+      - ./docker/seed.mssql.sql:/seed/seed.mssql.sql:ro

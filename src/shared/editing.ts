@@ -8,7 +8,13 @@ export interface EditableColumnMeta {
 
 /** Binary/spatial values are shown as lossy text, and generated columns can't be written. */
 export function isEditableColumn(c: EditableColumnMeta): boolean {
-  return !/GENERATED/i.test(c.extra) && !/blob|binary|geometry|point|linestring|polygon/i.test(c.type)
+  return (
+    !/GENERATED/i.test(c.extra) &&
+    // Not round-trippable as text. (SQL Server's binary `timestamp` is reported as `rowversion`.)
+    !/blob|binary|bytea|^image$|geometry|geography|point|linestring|polygon|hierarchyid|sql_variant|rowversion|^xml$/i.test(
+      c.type
+    )
+  )
 }
 
 /** Rows are addressed by primary key; a binary PK can't round-trip through the UI. */
@@ -19,6 +25,8 @@ export function tableEditability(
   if (type !== 'BASE TABLE') return { editable: false, reason: 'Views are read-only' }
   const pk = columns.filter((c) => c.key === 'PRI')
   if (pk.length === 0) return { editable: false, reason: 'Read-only: table has no primary key' }
-  if (pk.some((c) => /blob|binary/i.test(c.type))) return { editable: false, reason: 'Read-only: binary primary key' }
+  if (pk.some((c) => /blob|binary|bytea/i.test(c.type))) {
+    return { editable: false, reason: 'Read-only: binary primary key' }
+  }
   return { editable: true }
 }

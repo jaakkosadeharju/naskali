@@ -35,7 +35,7 @@ export function parseNestedJson(s: string): Json[] | { [k: string]: Json } | nul
 }
 
 export function isJsonType(type: string): boolean {
-  return /^json$/i.test(type)
+  return /^jsonb?$/i.test(type)
 }
 
 // ---- Editing ------------------------------------------------------------------

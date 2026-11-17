@@ -1,16 +1,32 @@
 # Naskali (POC)
 
-A desktop SQL client proof of concept: **Electron + React + Monaco + Glide Data Grid**, talking to **MySQL** via `mysql2`.
+A desktop SQL client proof of concept: **Electron + React + Monaco + Glide Data Grid** for
+**MySQL, PostgreSQL, SQL Server and SQLite**.
+
+| Database | Driver | Notes |
+|---|---|---|
+| MySQL / MariaDB | `mysql2` | schemas = databases; double-click one to `USE` it |
+| PostgreSQL | `pg` + `pg-cursor` | schemas of the connected database; double-click sets `search_path` |
+| SQL Server | `mssql` (tedious) | schemas of the connected database (`dbo`, …) |
+| SQLite | Node's built-in `node:sqlite` | `main` + attached databases; no native module needed |
+
+All drivers are pure JavaScript, so packaging needs no native rebuilds.
 
 ## Quick start
 
 ```sh
 npm install
-npm run db:up      # MySQL 8.4 in Docker with a seeded `shop` database (user dev/dev)
-npm run dev        # app with hot reload
+npm run db:up        # MySQL 8.4 + PostgreSQL 17 in Docker, both with a seeded `shop` database
+npm run db:sqlite    # dev/shop.sqlite with the same data
+npm run dev          # app with hot reload
 ```
 
-Connect with `127.0.0.1:3306`, user `dev`, password `dev`, database `shop`.
+| Database | Connect with |
+|---|---|
+| MySQL | `127.0.0.1:3306`, user `dev` / `dev`, database `shop` |
+| PostgreSQL | `127.0.0.1:5432`, user `dev` / `dev`, database `shop` |
+| SQL Server | `npm run db:up:mssql` first (opt-in: ~1.5 GB image, accepts Microsoft's SQL Server EULA, Developer edition) → `127.0.0.1:14330` (not 1433, to avoid clashing with a local server), user `sa` / `Naskali!Dev1`, database `shop`, trust server certificate |
+| SQLite | `dev/shop.sqlite` |
 
 | Script | |
 |---|---|
@@ -18,14 +34,17 @@ Connect with `127.0.0.1:3306`, user `dev`, password `dev`, database `shop`.
 | `npm run build` | Production bundle into `out/` |
 | `npm run typecheck` | TypeScript check |
 | `npm run dist:linux` | AppImage + .deb into `dist/` |
-| `npm run db:down` | Stop the MySQL container |
+| `npm run db:up` / `db:up:mssql` / `db:down` | Start the MySQL + PostgreSQL / also SQL Server / stop all dev containers |
+| `npm run db:sqlite` | (Re)build `dev/shop.sqlite` |
 
 ## Features
 
 - **Ctrl+Enter** runs the selection, or the statement under the cursor (quote/comment-aware `;` splitting)
-- Cancel a running query (`KILL QUERY` over a separate metadata connection)
+- Cancel a running query (MySQL `KILL QUERY`, PostgreSQL `pg_cancel_backend`, SQL Server request cancel, SQLite: the
+  editor connection runs in a child process that is killed and reopened – node:sqlite has no interrupt)
 - Virtualized results grid (100k-row cap per result; copy cells with Ctrl+C)
-- Schema tree with filter; double-click a database to `USE` it, a column to insert its name
+- Connection dialog with a database-type picker (SQLite: file + Browse…, read-only / create options)
+- Schema tree with filter; double-click a schema to make it current (MySQL, PostgreSQL), a column to insert its name
 - **Table tabs**: hover a table in the tree → **Data** / **Schema** (double-click opens Data). Each tab has a Data | Schema toggle
   - *Schema*: columns, indexes, foreign keys, highlighted DDL
   - *Data*: paged (500 rows, PK-ordered) with a filter builder: column + operator + value rows joined by and/or.
@@ -65,14 +84,17 @@ Connect with `127.0.0.1:3306`, user `dev`, password `dev`, database `shop`.
 ```
 src/
   main/       Electron main process (Node): window, IPC handlers
-    mysql.ts            MySqlSession – editor connection + metadata connection
+    drivers/            Driver interface + mysql, postgres, mssql, sqlite (+ sqliteWorker) implementations;
+                        each normalizes its catalog (key 'PRI', type 'BASE TABLE'/'VIEW', 'GENERATED')
+    dialect.ts          per-database SQL differences (quoting, placeholders, paging, single-row DML, literals)
     tableQuery.ts       filter rows → parameterized WHERE; change sets → DELETE/UPDATE/INSERT (validated)
+    session.ts          table data paging, change preview/apply on top of any driver
     connectionStore.ts  saved connection (userData/connection.json)
   preload/    contextBridge → window.api (the only renderer↔Node bridge)
   shared/     types shared across processes (SqlApi, QueryResult, …) + editing rules
   renderer/   React UI (sandboxed, no Node)
     src/completion.ts   Monaco completion provider
-    src/sqlSplit.ts     statement splitter
+    src/sqlSplit.ts     statement splitter (per-dialect rules: $$ bodies, [idents], # comments…)
     src/components/     SqlEditor, ResultsGrid, SchemaTree, ConnectDialog,
                         TableView (+ FilterBar, TableSchemaView, SqlPreviewModal)
 ```
@@ -87,6 +109,11 @@ Database drivers live only in the main process. The renderer is sandboxed (`cont
   `COUNT(*)` for the pager can be slow on huge tables
 - Editing an empty value into a NULL cell is treated as "no change" (use a SQL statement to store `''` there)
 - All rows are kept in memory up to the cap; a real version should page or stream into the grid
-- `DELIMITER` blocks (stored procedure bodies) aren't split
+- MySQL `DELIMITER` blocks and SQL Server `GO` separators aren't supported in the editor
 - `SELECT SLEEP(n)` returns `1` when cancelled (that's MySQL behaviour); real queries report "interrupted"
-- To support other databases, put a `Driver` interface in front of `MySqlSession`
+- PostgreSQL / SQL Server: the Schema view's DDL is reconstructed from the catalog (columns, PK, FKs, indexes),
+  not the server's original definition; views show their real definition
+- SQL Server `decimal`/`numeric` values arrive as JS numbers (tedious), so very large/precise values lose precision;
+  `date`/`time` columns show as full timestamps. SQL Server can't switch schemas per session (qualify names instead)
+- SQLite integers beyond 2^53 lose precision (they aren't read as BigInt)
+- PostgreSQL/SQL Server/SQLite results cut off at 100k rows don't count the remaining rows (MySQL does)

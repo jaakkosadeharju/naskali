@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { monaco, SQL_LANG } from '../monacoSetup'
+import { editorLanguage, monaco } from '../monacoSetup'
 
 interface Props {
   title: string
@@ -16,7 +16,7 @@ export function SqlPreviewModal({ title, statements, onClose, onOpenInEditor }: 
   useEffect(() => {
     let live = true
     // colorize() escapes the text itself, so its HTML output is safe to inject.
-    void monaco.editor.colorize(sql, SQL_LANG, {}).then((h) => live && setHtml(h))
+    void monaco.editor.colorize(sql, editorLanguage(), {}).then((h) => live && setHtml(h))
     return () => {
       live = false
     }
