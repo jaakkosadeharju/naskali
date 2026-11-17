@@ -6,12 +6,12 @@ directories:
 icon: build/icon.png # 1024px source; mac/win formats are generated from it
 files:
   - out/**
-  - resources/** # window icon, referenced from out/main via electron-vite's ?asset import
+  - resources/** # window icon + splash screen, referenced from out/main via electron-vite's ?asset import
   - package.json
 linux:
   target: [AppImage, deb]
   category: Development
-  icon: build/icons # per-size PNGs (16–32 px use the simplified build/icon-small.svg)
+  icon: build/icons # per-size PNGs rendered from build/icon-source.png
   maintainer: Naskali POC
   syncDesktopName: true # .desktop file name = desktopName, so the running window maps to its menu entry/icon
 mac:

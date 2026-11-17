@@ -899,3 +899,34 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Connect dialog branding (matches the splash screen) */
+.connect-dialog {
+  padding-top: 0;
+  overflow: hidden;
+}
+.dialog-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 -20px 6px;
+  padding: 18px 20px;
+  background: radial-gradient(130% 120% at 0% 0%, #1a4aa8 0%, #123a8c 30%, #0b1e4a 75%, #0a1430 100%);
+  border-bottom: 1px solid rgba(120, 180, 255, 0.18);
+}
+.dialog-brand img {
+  flex: none;
+  filter: drop-shadow(0 6px 12px rgba(0, 10, 40, 0.55));
+}
+.dialog-brand h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0.3px;
+  color: #e8f1ff;
+}
+.dialog-brand p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #9db8e6;
+}

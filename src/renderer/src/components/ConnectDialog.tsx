@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { ConnectionConfig } from '../../../shared/types'
+import logo from '../assets/logo.png'
 
 interface Props {
   onConnected: (cfg: ConnectionConfig, info: { serverVersion: string; database: string | null }) => void
@@ -37,8 +38,14 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
 
   return (
     <div className="dialog-backdrop">
-      <form className="dialog" onSubmit={submit}>
-        <h2>Connect to MySQL</h2>
+      <form className="dialog connect-dialog" onSubmit={submit}>
+        <div className="dialog-brand">
+          <img src={logo} alt="" width={56} height={56} />
+          <div>
+            <h2>Naskali</h2>
+            <p>Connect to a MySQL server</p>
+          </div>
+        </div>
         <div className="row">
           <label className="grow">
             Host
@@ -58,7 +65,9 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
           <input type="password" value={cfg.password} onChange={(e) => set('password', e.target.value)} />
         </label>
         <label>
-          Default database <span className="muted">(optional)</span>
+          <span>
+            Default database <span className="muted">(optional)</span>
+          </span>
           <input value={cfg.database ?? ''} onChange={(e) => set('database', e.target.value)} />
         </label>
         <label className="check">

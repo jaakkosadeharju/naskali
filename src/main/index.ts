@@ -5,11 +5,44 @@ import { forgetConnection, loadConnection, saveConnection } from './connectionSt
 import type { ChangeSet, ConnectionConfig, IpcResult, TableDataRequest } from '../shared/types'
 // `?asset` makes electron-vite copy the file into the build and give us its runtime path.
 import icon from '../../resources/icon.png?asset'
+// splash.html loads splash.png from the same folder (resources/ is packaged as-is).
+import splashHtml from '../../resources/splash.html?asset'
 
 const session = new MySqlSession()
 
-function createWindow(): void {
+/** Keep the splash up at least this long so it doesn't just flash by. */
+const MIN_SPLASH_MS = 1200
+/** Show the main window anyway if it hasn't signalled ready by then. */
+const MAX_SPLASH_MS = 15_000
+
+function createSplash(): BrowserWindow {
+  const splash = new BrowserWindow({
+    width: 340,
+    height: 380,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    center: true,
+    show: false,
+    title: 'Naskali',
+    ...(process.platform !== 'darwin' ? { icon } : {}),
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  })
+  splash.webContents.on('will-navigate', (e) => e.preventDefault())
+  splash.once('ready-to-show', () => splash.show())
+  void splash.loadFile(splashHtml)
+  return splash
+}
+
+function createWindow({ withSplash }: { withSplash: boolean }): void {
+  const splash = withSplash ? createSplash() : null
+  const started = Date.now()
+
   const win = new BrowserWindow({
+    show: !splash, // with a splash: stay hidden until the UI has painted
     width: 1400,
     height: 900,
     minWidth: 800,
@@ -38,6 +71,22 @@ function createWindow(): void {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+
+  if (splash) {
+    let done = false
+    const reveal = (): void => {
+      if (done) return
+      done = true
+      if (!win.isDestroyed()) win.show()
+      if (!splash.isDestroyed()) splash.destroy()
+    }
+    win.once('ready-to-show', () => setTimeout(reveal, Math.max(0, MIN_SPLASH_MS - (Date.now() - started))))
+    setTimeout(reveal, MAX_SPLASH_MS)
+    // Closing the (hidden) main window early must not leave the splash behind.
+    win.once('closed', () => {
+      if (!splash.isDestroyed()) splash.destroy()
+    })
   }
 }
 
@@ -75,9 +124,9 @@ handle('db:previewChanges', (cs: ChangeSet) => session.previewChanges(cs))
 handle('db:applyChanges', (cs: ChangeSet) => session.applyChanges(cs))
 
 app.whenReady().then(() => {
-  createWindow()
+  createWindow({ withSplash: true })
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) createWindow({ withSplash: false })
   })
 })
 
