@@ -117,3 +117,7 @@ Database drivers live only in the main process. The renderer is sandboxed (`cont
   `date`/`time` columns show as full timestamps. SQL Server can't switch schemas per session (qualify names instead)
 - SQLite integers outside JavaScript's safe range are displayed as exact decimal text. Pages with primary keys that cannot round-trip through the grid are read-only.
 - PostgreSQL/SQL Server/SQLite results cut off at 100k rows don't count the remaining rows (MySQL does)
+
+## License
+
+Naskali is licensed under the [MIT License](LICENSE).
