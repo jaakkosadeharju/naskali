@@ -100,7 +100,7 @@ export function TableSchemaView({ details: d, onOpenSql }: Props): JSX.Element {
                   <td className="mono strong">{fk.name}</td>
                   <td className="mono">{fk.columns.join(', ')}</td>
                   <td className="mono">
-                    {fk.refTable}({fk.refColumns.join(', ')})
+                    {fk.refSchema === d.schema ? fk.refTable : `${fk.refSchema}.${fk.refTable}`}({fk.refColumns.join(', ')})
                   </td>
                 </tr>
               ))}

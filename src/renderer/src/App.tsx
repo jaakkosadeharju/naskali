@@ -9,7 +9,7 @@ import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
 import { TablePalette } from './components/TablePalette'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
-import type { ConnectionConfig, QueryResult, SchemaInfo } from '../../shared/types'
+import type { ConnectionConfig, QueryResult, RowFilter, SchemaInfo } from '../../shared/types'
 
 interface Connection {
   label: string
@@ -24,7 +24,9 @@ type RunState =
 
 type Tab =
   | { id: 'query'; kind: 'query' }
-  | { id: string; kind: 'table'; schema: string; table: string; view: TableViewMode }
+  | { id: string; kind: 'table'; schema: string; table: string; view: TableViewMode; filters?: RowFilter[] }
+
+const filterSummary = (filters: RowFilter[]): string => filters.map((f) => `${f.column} = ${f.value}`).join(', ')
 
 const QUERY_TAB: Tab = { id: 'query', kind: 'query' }
 
@@ -207,7 +209,12 @@ export function App(): JSX.Element {
     requestAnimationFrame(() => editor.focus())
   }
 
-  const openTable = (schema: string, table: string, view: TableViewMode): void => {
+  /**
+   * Opens a table tab. With `filters` (following a foreign key) it gets its own tab keyed by the
+   * filter, so the same reference reuses its tab. Stable (only uses state setters): it feeds
+   * memoized grid props, and a new function per render would make the grids re-push forever.
+   */
+  const openTable = useCallback((schema: string, table: string, view: TableViewMode, filters?: RowFilter[]): void => {
     const key = `${schema}.${table}`
     setRecentTables((prev) => {
       const next = [key, ...prev.filter((k) => k !== key)].slice(0, MAX_RECENT)
@@ -218,14 +225,18 @@ export function App(): JSX.Element {
       }
       return next
     })
-    const id = `table:${schema}.${table}`
+    const id = `table:${key}` + (filters?.length ? `?${filters.map((f) => `${f.column}${f.op}${f.value}`).join('&')}` : '')
     setTabs((ts) =>
       ts.some((t) => t.id === id)
         ? ts.map((t) => (t.id === id && t.kind === 'table' ? { ...t, view } : t))
-        : [...ts, { id, kind: 'table', schema, table, view }]
+        : [...ts, { id, kind: 'table', schema, table, view, filters }]
     )
     setActiveId(id)
-  }
+  }, [])
+  const openReference = useCallback(
+    (schema: string, table: string, filters: RowFilter[]) => openTable(schema, table, 'data', filters),
+    [openTable]
+  )
 
   const closeTab = (id: string): void => {
     if (id === 'query') return
@@ -292,7 +303,11 @@ export function App(): JSX.Element {
                 className={`tab ${t.id === activeId ? 'active' : ''}`}
                 onClick={() => setActiveId(t.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
-                title={t.kind === 'table' ? `${t.schema}.${t.table}` : 'SQL editor'}
+                title={
+                  t.kind === 'table'
+                    ? `${t.schema}.${t.table}${t.filters?.length ? ` where ${filterSummary(t.filters)}` : ''}`
+                    : 'SQL editor'
+                }
               >
                 {t.kind === 'query' ? (
                   <span>✎ Query</span>
@@ -300,6 +315,7 @@ export function App(): JSX.Element {
                   <>
                     <span>
                       {t.view === 'schema' ? 'ⓘ' : '▦'} {t.table}
+                      {t.filters?.length ? <span className="tab-filter"> {filterSummary(t.filters)}</span> : null}
                     </span>
                     <button
                       className="tab-close"
@@ -335,6 +351,8 @@ export function App(): JSX.Element {
                     view={t.view}
                     onViewChange={(v) => setTableView(t.id, v)}
                     onOpenSql={openInEditor}
+                    initialFilters={t.filters}
+                    onOpenReference={openReference}
                     onDirtyChange={(dirty) => {
                       if (dirty) dirtyTabs.current.add(t.id)
                       else dirtyTabs.current.delete(t.id)

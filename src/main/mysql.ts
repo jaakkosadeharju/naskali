@@ -257,7 +257,8 @@ export class MySqlSession {
       const fk = fks.get(r.name) ?? {
         name: r.name,
         columns: [],
-        refTable: r.refSchema === schema ? r.refTable : `${r.refSchema}.${r.refTable}`,
+        refSchema: r.refSchema,
+        refTable: r.refTable,
         refColumns: []
       }
       fk.columns.push(r.col)

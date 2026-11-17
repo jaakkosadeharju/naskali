@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FilterBar, type DraftFilter } from './FilterBar'
-import { ResultsGrid, type GridEditing } from './ResultsGrid'
+import { FilterBar, newFilter, type DraftFilter } from './FilterBar'
+import { ResultsGrid, type CellLinks, type GridEditing } from './ResultsGrid'
 import { TableSchemaView } from './TableSchemaView'
 import { SqlPreviewModal } from './SqlPreviewModal'
 import { isEditableColumn, tableEditability } from '../../../shared/editing'
@@ -18,6 +18,10 @@ interface Props {
   onOpenSql: (sql: string) => void
   /** Reports whether this tab has unsaved edits (so closing it can ask first). */
   onDirtyChange: (dirty: boolean) => void
+  /** Filters applied when the tab opens (e.g. following a foreign key). */
+  initialFilters?: RowFilter[]
+  /** Opens a referenced table filtered to the given row (foreign-key links). */
+  onOpenReference: (schema: string, table: string, filters: RowFilter[]) => void
 }
 
 /** Edits to one row, keyed in `pending` by its original primary key values. */
@@ -51,13 +55,13 @@ interface Applied {
 
 const strip = (fs: DraftFilter[]): RowFilter[] => fs.map(({ column, op, value }) => ({ column, op, value }))
 
-export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirtyChange }: Props): JSX.Element {
+export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirtyChange, initialFilters, onOpenReference }: Props): JSX.Element {
   const [details, setDetails] = useState<TableDetails | null>(null)
   const [detailsError, setDetailsError] = useState<string | null>(null)
 
-  const [draft, setDraft] = useState<DraftFilter[]>([])
+  const [draft, setDraft] = useState<DraftFilter[]>(() => (initialFilters ?? []).map((f) => ({ ...newFilter(f.column), op: f.op, value: f.value })))
   const [match, setMatch] = useState<'all' | 'any'>('all')
-  const [applied, setApplied] = useState<Applied>({ filters: [], match: 'all' })
+  const [applied, setApplied] = useState<Applied>(() => ({ filters: initialFilters ?? [], match: 'all' }))
   const [offset, setOffset] = useState(0)
   const [data, setData] = useState<TableDataResult | null>(null)
   const [dataError, setDataError] = useState<string | null>(null)
@@ -289,6 +293,39 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
     const byName = new Map(details.columns.map((c) => [c.name, c.type]))
     return fields.map((f) => byName.get(f.name) ?? f.type)
   }, [details, fields])
+  // Foreign-key cells link to the referenced row (all columns of a composite key must be non-NULL).
+  const cellLinks = useMemo<CellLinks | undefined>(() => {
+    if (!details || !fields || details.foreignKeys.length === 0) return undefined
+    const index = new Map(fields.map((f, i) => [f.name, i]))
+    const fkByCol = new Map<number, TableDetails['foreignKeys'][number]>()
+    for (const fk of details.foreignKeys) {
+      if (fk.columns.some((c) => !index.has(c))) continue
+      for (const c of fk.columns) if (!fkByCol.has(index.get(c)!)) fkByCol.set(index.get(c)!, fk)
+    }
+    if (fkByCol.size === 0) return undefined
+    const filtersFor = (row: number, col: number): RowFilter[] | null => {
+      const fk = fkByCol.get(col)
+      const r = displayRows[row]
+      if (!fk || !r) return null
+      const values = fk.columns.map((c) => r[index.get(c)!])
+      if (values.some((v) => v === null)) return null
+      return fk.refColumns.map((rc, i) => ({ column: rc, op: '=', value: String(values[i]) }))
+    }
+    const target = (col: number): string => {
+      const fk = fkByCol.get(col)!
+      return fk.refSchema === schema ? fk.refTable : `${fk.refSchema}.${fk.refTable}`
+    }
+    return {
+      has: (row, col) => filtersFor(row, col) !== null,
+      label: (row, col) => `${target(col)} where ${filtersFor(row, col)!.map((f) => `${f.column} = ${f.value}`).join(' and ')}`,
+      open: (row, col) => {
+        const filters = filtersFor(row, col)
+        const fk = fkByCol.get(col)
+        if (filters && fk) onOpenReference(fk.refSchema, fk.refTable, filters)
+      }
+    }
+  }, [details, fields, displayRows, schema, onOpenReference])
+
   const describeRow = useCallback(
     (row: number): string => {
       if (row < inserts.length) return 'new row'
@@ -403,6 +440,7 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
                 sourceLabel={`${schema}.${table}`}
                 columnTypes={columnTypes}
                 describeRow={describeRow}
+                cellLinks={cellLinks}
               />
             ) : (
               <div className="placeholder">Loading…</div>

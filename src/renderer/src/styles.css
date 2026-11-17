@@ -889,3 +889,13 @@ kbd {
   margin-right: 3px;
   color: var(--text);
 }
+
+/* Foreign-key tabs */
+.tab-filter {
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
