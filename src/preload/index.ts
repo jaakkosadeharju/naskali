@@ -11,6 +11,7 @@ const api: SqlApi = {
   deleteConnection: (id) => ipcRenderer.invoke('db:deleteConnection', id),
   introspect: () => ipcRenderer.invoke('db:introspect'),
   query: (sql) => ipcRenderer.invoke('db:query', sql),
+  exportRows: (format, name, columns, rows) => ipcRenderer.invoke('db:exportRows', format, name, columns, rows),
   cancel: () => ipcRenderer.invoke('db:cancel'),
   useSchema: (name) => ipcRenderer.invoke('db:use', name),
   pickSqliteFile: () => ipcRenderer.invoke('db:pickSqliteFile'),

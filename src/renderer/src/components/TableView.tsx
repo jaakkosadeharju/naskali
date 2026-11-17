@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FilterBar, newFilter, type DraftFilter } from './FilterBar'
+import { ExportRows } from './ExportRows'
 import { ResultsGrid, type CellLinks, type GridEditing } from './ResultsGrid'
 import { TableSchemaView } from './TableSchemaView'
 import { SqlPreviewModal } from './SqlPreviewModal'
@@ -414,6 +415,9 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onOpenSql
         )}
         {view === 'data' && editability && !editability.editable && <span className="muted edit-hint">{editability.reason}</span>}
         <div className="spacer" />
+        {view === 'data' && data && !dataError && (
+          <ExportRows fields={data.fields} rows={data.rows} name={`${schema}.${table}-page-${Math.floor(data.offset / PAGE_SIZE) + 1}`} page disabled={loading || saving} />
+        )}
         <button onClick={refresh} title="Reload (pending edits are kept)">
           ⟳ Refresh
         </button>

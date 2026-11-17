@@ -12,7 +12,9 @@ import {
   type Theme
 } from '@glideapps/glide-data-grid'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { CellValue, ResultField } from '../../../shared/types'
+import { createPortal } from 'react-dom'
+import { exportRows, exportSelectionAsJson } from '../../../shared/exportRows'
+import type { CellValue, ExportFormat, ResultField } from '../../../shared/types'
 import { useInspector } from '../inspector'
 
 
@@ -114,9 +116,41 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 
 const emptySelection: GridSelection = { rows: CompactSelection.empty(), columns: CompactSelection.empty() }
 
+function copySelection(selection: GridSelection, col: number, row: number, columnCount: number, rowCount: number) {
+  // A context click outside the selection targets just the clicked cell.
+  const current = selection.current
+  const range = current && [current.range, ...current.rangeStack].find((r) =>
+    col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+  )
+  if (range) {
+    return {
+      columns: indexes(range.x, Math.min(columnCount, range.x + range.width)),
+      rows: indexes(range.y, Math.min(rowCount, range.y + range.height))
+    }
+  }
+  if (selection.rows.hasIndex(row)) return { columns: indexes(0, columnCount), rows: selection.rows.toArray().filter((r) => r < rowCount) }
+  if (selection.columns.hasIndex(col)) return { columns: selection.columns.toArray().filter((c) => c < columnCount), rows: indexes(0, rowCount) }
+  return { columns: [col], rows: [row] }
+}
+
+function indexes(start: number, end: number): number[] {
+  return Array.from({ length: end - start }, (_, i) => start + i)
+}
+
+interface CopyMenu {
+  x: number
+  y: number
+  columns: number[]
+  rows: number[]
+}
+
 export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selectionResetKey, sourceLabel, columnTypes, describeRow, cellLinks }: Props): JSX.Element {
   const [columns, setColumns] = useState<GridColumn[]>([])
   const [selection, setSelection] = useState<GridSelection>(emptySelection)
+  const [menu, setMenu] = useState<CopyMenu | null>(null)
+  const [copyError, setCopyError] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const focusBeforeMenu = useRef<HTMLElement | null>(null)
   const rowsRef = useRef(rows)
   rowsRef.current = rows
   const cellLinksRef = useRef(cellLinks)
@@ -139,6 +173,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
 
   useEffect(() => {
     setSelection(emptySelection)
+    setMenu(null)
   }, [fields])
 
   useEffect(() => {
@@ -312,29 +347,105 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
     [editing]
   )
 
+  function openCopyMenu([col, row]: Item, x: number, y: number): void {
+    focusBeforeMenu.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setCopyError(false)
+    setMenu({ x, y, ...copySelection(selection, col, row, fields.length, rows.length) })
+  }
+
+  function closeCopyMenu(): void {
+    setMenu(null)
+    focusBeforeMenu.current?.focus()
+  }
+
+  useEffect(() => {
+    if (!menu) return
+    menuRef.current?.querySelector('button')?.focus()
+    const dismiss = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setMenu(null)
+    }
+    window.addEventListener('pointerdown', dismiss, true)
+    return () => window.removeEventListener('pointerdown', dismiss, true)
+  }, [menu])
+
+  async function copyAs(format: ExportFormat | 'json-with-headers', target: CopyMenu): Promise<void> {
+    try {
+      const headers = target.columns.map((col) => fields[col].name)
+      const values = target.rows.map((row) => target.columns.map((col) => rows[row]?.[col] ?? null))
+      const text = format === 'json-with-headers'
+        ? exportSelectionAsJson(headers, values)
+        : Array.from(exportRows(format, headers, values)).join('')
+      await navigator.clipboard.writeText(text)
+      closeCopyMenu()
+    } catch {
+      setCopyError(true)
+    }
+  }
+
   return (
-    <DataEditor
-      columns={columns}
-      rows={rows.length}
-      getCellContent={getCellContent}
-      getCellsForSelection={true}
-      onCellEdited={editing ? onCellEdited : undefined}
-      onDelete={editing ? onDelete : undefined}
-      gridSelection={selection}
-      onGridSelectionChange={onGridSelectionChange}
-      onCellActivated={onCellActivated}
-      onCellClicked={cellLinks ? onCellClicked : undefined}
-      drawCell={cellLinks ? drawCell : undefined}
-      theme={darkTheme}
-      rowMarkers={editing ? 'clickable-number' : 'number'}
-      rowSelect="multi"
-      smoothScrollX
-      smoothScrollY
-      width="100%"
-      height="100%"
-      onColumnResize={(_col, newSize, colIndex) =>
-        setColumns((cs) => cs.map((c, i) => (i === colIndex ? { ...c, width: newSize } : c)))
-      }
-    />
+    <>
+      <DataEditor
+        columns={columns}
+        rows={rows.length}
+        getCellContent={getCellContent}
+        getCellsForSelection={true}
+        onCellEdited={editing ? onCellEdited : undefined}
+        onDelete={editing ? onDelete : undefined}
+        gridSelection={selection}
+        onGridSelectionChange={onGridSelectionChange}
+        onCellActivated={onCellActivated}
+        onCellContextMenu={(cell, event) => {
+          if (cell[0] < 0 || cell[1] >= rows.length) return
+          event.preventDefault()
+          openCopyMenu(cell, event.bounds.x + event.localEventX, event.bounds.y + event.localEventY)
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+          const cell = selection.current?.cell ?? event.location
+          if (!event.bounds || !cell || cell[0] < 0 || cell[1] < 0 || cell[1] >= rows.length) return
+          event.cancel()
+          openCopyMenu(cell, event.bounds.x, event.bounds.y + event.bounds.height)
+        }}
+        onCellClicked={cellLinks ? onCellClicked : undefined}
+        drawCell={cellLinks ? drawCell : undefined}
+        theme={darkTheme}
+        rowMarkers="clickable-number"
+        rowSelect="multi"
+        smoothScrollX
+        smoothScrollY
+        width="100%"
+        height="100%"
+        onColumnResize={(_col, newSize, colIndex) =>
+          setColumns((cs) => cs.map((c, i) => (i === colIndex ? { ...c, width: newSize } : c)))
+        }
+      />
+      {menu && createPortal(
+        <div
+          ref={menuRef}
+          className="grid-copy-menu"
+          role="group"
+          aria-label="Copy cells"
+          style={{
+            left: `clamp(4px, ${menu.x}px, calc(100vw - 196px))`,
+            top: `clamp(4px, ${menu.y}px, calc(100vh - 120px))`
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.stopPropagation()
+              closeCopyMenu()
+            }
+          }}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) setMenu(null)
+          }}
+        >
+          <button type="button" onClick={() => void copyAs('csv', menu)}>Copy as CSV</button>
+          <button type="button" onClick={() => void copyAs('json', menu)}>Copy as JSON</button>
+          <button type="button" onClick={() => void copyAs('json-with-headers', menu)}>Copy as JSON with headers</button>
+          {copyError && <span role="alert">Clipboard unavailable</span>}
+        </div>,
+        document.body
+      )}
+    </>
   )
 }
