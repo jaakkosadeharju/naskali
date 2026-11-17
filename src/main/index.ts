@@ -118,6 +118,17 @@ handle('db:connect', async (cfg: ConnectionConfig) => {
   driver = next
   return info
 })
+handle('db:testConnection', async (cfg: ConnectionConfig) => {
+  // A SQLite test only opens an existing file and cannot create or change it.
+  const probe = createDriver(cfg.driver === 'sqlite' ? { ...cfg, readOnly: true, create: false } : cfg)
+  try {
+    await probe.connect()
+  } catch (error) {
+    await probe.disconnect().catch(() => {})
+    throw error
+  }
+  await probe.disconnect()
+})
 handle('db:disconnect', async () => {
   await driver?.disconnect()
   driver = null
