@@ -23,11 +23,15 @@ export function SqlPreviewModal({ title, statements, onClose, onOpenInEditor }: 
   }, [sql])
 
   useEffect(() => {
+    // Capture phase + stopPropagation so Escape doesn't also reach the grid (which would clear its selection).
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onClose()
+      }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [onClose])
 
   return (

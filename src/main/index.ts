@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { MySqlSession } from './mysql'
 import { forgetConnection, loadConnection, saveConnection } from './connectionStore'
 import type { ChangeSet, ConnectionConfig, IpcResult, TableDataRequest } from '../shared/types'
+// `?asset` makes electron-vite copy the file into the build and give us its runtime path.
+import icon from '../../resources/icon.png?asset'
 
 const session = new MySqlSession()
 
@@ -13,8 +15,10 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 500,
     backgroundColor: '#1e1e1e',
-    title: 'SQL Tool',
+    title: 'Naskali',
     autoHideMenuBar: true,
+    // Window/taskbar icon on Linux and Windows (macOS takes it from the app bundle).
+    ...(process.platform !== 'darwin' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

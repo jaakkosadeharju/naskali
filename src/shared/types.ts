@@ -118,10 +118,29 @@ export interface RowUpdate {
   set: Record<string, CellValue>
 }
 
+export interface RowInsert {
+  /** Only explicitly set columns; omitted columns get their DEFAULT / auto_increment. */
+  values: Record<string, CellValue>
+}
+
+export interface RowDelete {
+  /** Primary key values of the row to delete (exactly the PK columns). */
+  key: Record<string, CellValue>
+}
+
+/** Applied in this order: deletes, updates, inserts (so freed unique values can be reused). */
 export interface ChangeSet {
   schema: string
   table: string
+  deletes: RowDelete[]
   updates: RowUpdate[]
+  inserts: RowInsert[]
+}
+
+export interface ChangeSummary {
+  deleted: number
+  updated: number
+  inserted: number
 }
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
@@ -140,6 +159,6 @@ export interface SqlApi {
   tableData(req: TableDataRequest): Promise<IpcResult<TableDataResult>>
   /** The statements `applyChanges` would run, with values inlined (for display). */
   previewChanges(cs: ChangeSet): Promise<IpcResult<string[]>>
-  /** Runs all updates in one transaction; rolls back if any row isn't matched exactly once. */
-  applyChanges(cs: ChangeSet): Promise<IpcResult<{ statements: number }>>
+  /** Runs the whole change set in one transaction; rolls back if any statement doesn't affect exactly one row. */
+  applyChanges(cs: ChangeSet): Promise<IpcResult<ChangeSummary>>
 }
