@@ -86,6 +86,7 @@ export interface ResultField {
 
 /** Cell values are normalised to JSON-friendly primitives before crossing IPC. */
 export type CellValue = string | number | boolean | null
+export type ExportFormat = 'csv' | 'json'
 
 export type QueryResult =
   | {
@@ -215,6 +216,7 @@ export interface SqlApi {
   introspect(): Promise<IpcResult<SchemaInfo[]>>
   /** Also returns the session's current schema, since the SQL may have run `USE …` / `SET search_path …`. */
   query(sql: string): Promise<IpcResult<{ result: QueryResult; schema: string | null }>>
+  exportRows(format: ExportFormat, name: string, columns: string[], rows: CellValue[][]): Promise<IpcResult<void>>
   cancel(): Promise<IpcResult<void>>
   useSchema(name: string): Promise<IpcResult<void>>
   /** Shows a file picker for a SQLite database; null when cancelled. */

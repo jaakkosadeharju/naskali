@@ -146,6 +146,52 @@ input:focus {
   min-height: 0;
   overflow: hidden;
 }
+.query-results {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.query-results-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.row-export {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.row-export-error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--error);
+}
+.grid-copy-menu {
+  position: fixed;
+  z-index: 110;
+  display: grid;
+  gap: 2px;
+  width: 192px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-2);
+  box-shadow: 0 5px 18px #0008;
+}
+.grid-copy-menu button {
+  border-color: transparent;
+  text-align: left;
+}
+.grid-copy-menu button:focus-visible {
+  outline: 1px solid var(--accent-hover);
+}
+.grid-copy-menu [role='alert'] {
+  padding: 3px 8px;
+  color: var(--error);
+}
 
 /* Tabs */
 .tabbar {

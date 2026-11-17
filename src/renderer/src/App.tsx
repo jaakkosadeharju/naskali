@@ -4,6 +4,7 @@ import { completionState } from './completion'
 import { ConnectDialog } from './components/ConnectDialog'
 import { SchemaTree } from './components/SchemaTree'
 import { SqlEditor, sqlToRun } from './components/SqlEditor'
+import { ExportRows } from './components/ExportRows'
 import { ResultsGrid } from './components/ResultsGrid'
 import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
@@ -568,7 +569,19 @@ function ResultsPanel({ run, label }: { run: RunState; label: string }): JSX.Ele
     case 'error':
       return <pre className="error-panel">{run.error}</pre>
     case 'done':
-      if (run.result.kind === 'rows') return <ResultsGrid fields={run.result.fields} rows={run.result.rows} sourceLabel={label} />
+      if (run.result.kind === 'rows') {
+        const { fields, rows } = run.result
+        return (
+          <div className="query-results">
+            <div className="query-results-actions">
+              <ExportRows fields={fields} rows={rows} name={label} />
+            </div>
+            <div className="table-body">
+              <ResultsGrid fields={fields} rows={rows} sourceLabel={label} />
+            </div>
+          </div>
+        )
+      }
       return (
         <div className="placeholder">
           {run.result.affectedRows === null ? 'Statement completed' : `${run.result.affectedRows} row(s) affected`}

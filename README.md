@@ -45,6 +45,8 @@ npm run dev          # app with hot reload
 - Cancel a running query (MySQL `KILL QUERY`, PostgreSQL `pg_cancel_backend`, SQL Server request cancel, SQLite: the
   editor connection runs in a child process that is killed and reopened – node:sqlite has no interrupt)
 - Virtualized results grid (100k-row cap per result; copy cells with Ctrl+C)
+- Export loaded query results or the current filtered table page as CSV or JSON. Table exports use saved database values.
+- Right-click selected grid cells to copy them as CSV or JSON. **Copy as JSON with headers** uses column names as keys and returns one object for a single selected row or an array of objects for multiple rows.
 - Connection dialog with a database-type picker (SQLite: file + Browse…, read-only / create options)
 - Schema tree with filter; double-click a schema to make it current (MySQL, PostgreSQL), a column to insert its name
 - **Table tabs**: use the **Data** and **Schema** icons beside each table (double-click opens Data). Each tab has a Data | Schema toggle
@@ -105,7 +107,7 @@ Database drivers live only in the main process. The renderer is sandboxed (`cont
 
 ## Known POC limitations / next steps
 
-- One active connection; no query history or export yet
+- One active connection; no query history yet
 - No optimistic-concurrency check beyond "row still exists" (a concurrent change to the same row is overwritten);
   no sorting by column header yet;
   `COUNT(*)` for the pager can be slow on huge tables

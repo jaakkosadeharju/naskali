@@ -1,10 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createDriver } from './drivers'
+import { exportRows } from '../shared/exportRows'
 import type { Driver } from './drivers/types'
 import { applyChanges, previewChanges, tableData } from './session'
 import { deleteConnection, listConnections, saveConnection } from './connectionStore'
-import type { ChangeSet, ConnectionConfig, IpcResult, TableDataRequest } from '../shared/types'
+import type { CellValue, ChangeSet, ConnectionConfig, ExportFormat, IpcResult, TableDataRequest } from '../shared/types'
 // `?asset` makes electron-vite copy the file into the build and give us its runtime path.
 import icon from '../../resources/icon.png?asset'
 // splash.html loads splash.png from the same folder (resources/ is packaged as-is).
@@ -141,6 +143,19 @@ handle('db:query', async (sql: string) => {
   const d = requireDriver()
   const result = await d.query(sql)
   return { result, schema: await d.currentSchema() }
+})
+handle('db:exportRows', async (format: ExportFormat, name: string, columns: string[], rows: CellValue[][]) => {
+  if (format !== 'csv' && format !== 'json') throw new Error('Unsupported export format')
+  const filename = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'results'
+  const options: Electron.SaveDialogOptions = {
+    title: 'Export rows',
+    defaultPath: `${filename}.${format}`,
+    filters: [{ name: format.toUpperCase(), extensions: [format] }]
+  }
+  const win = BrowserWindow.getFocusedWindow()
+  const { canceled, filePath } = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+  if (canceled || !filePath) return
+  await writeFile(filePath, exportRows(format, columns, rows), 'utf8')
 })
 handle('db:cancel', () => requireDriver().cancel())
 handle('db:use', (name: string) => requireDriver().useSchema(name))
