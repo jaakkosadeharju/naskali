@@ -786,3 +786,106 @@ body.resizing {
   border-color: var(--error);
   outline-color: var(--error);
 }
+
+/* Table palette (Ctrl/Cmd+P) */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 72px;
+}
+.palette {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 120px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.palette-input {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 12px 14px;
+  font-size: 15px;
+  background: var(--bg-2);
+}
+.palette-input:focus {
+  outline: none;
+}
+.palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+.palette-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.palette-list li.selected {
+  background: #04395e;
+}
+.palette-icon {
+  width: 16px;
+  color: var(--muted);
+}
+.palette-name {
+  font-family: ui-monospace, 'JetBrains Mono', Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.palette-name mark {
+  background: none;
+  color: #4fc1ff;
+  font-weight: 700;
+}
+.palette-schema {
+  color: var(--muted);
+  font-size: 12px;
+}
+.palette-right {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+}
+.palette-tag {
+  color: #dcdcaa;
+}
+.palette-empty {
+  padding: 14px;
+  color: var(--muted);
+}
+.palette-footer {
+  display: flex;
+  gap: 16px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+kbd {
+  font: 11px ui-monospace, monospace;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-right: 3px;
+  color: var(--text);
+}

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SchemaInfo } from '../../../shared/types'
+import { MOD } from './TablePalette'
 
 interface Props {
   schemas: SchemaInfo[]
@@ -25,7 +26,7 @@ export function SchemaTree({ schemas, currentDb, onUseDatabase, onInsert, onOpen
   return (
     <div className="schema-tree">
       <div className="tree-header">
-        <input placeholder="Filter tables…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <input placeholder={`Filter (${MOD}P: open table)`} value={filter} onChange={(e) => setFilter(e.target.value)} />
         <button title="Refresh schema" onClick={onRefresh}>
           ⟳
         </button>

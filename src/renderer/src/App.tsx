@@ -7,6 +7,7 @@ import { SqlEditor, sqlToRun } from './components/SqlEditor'
 import { ResultsGrid } from './components/ResultsGrid'
 import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
+import { TablePalette } from './components/TablePalette'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
 import type { ConnectionConfig, QueryResult, SchemaInfo } from '../../shared/types'
 
@@ -26,6 +27,17 @@ type Tab =
   | { id: string; kind: 'table'; schema: string; table: string; view: TableViewMode }
 
 const QUERY_TAB: Tab = { id: 'query', kind: 'query' }
+
+const RECENT_TABLES_KEY = 'naskali.recentTables'
+const MAX_RECENT = 20
+function loadRecentTables(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_TABLES_KEY) ?? '[]')
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, MAX_RECENT) : []
+  } catch {
+    return []
+  }
+}
 
 const INSPECTOR_WIDTH_KEY = 'naskali.inspectorWidth'
 const clampWidth = (w: number): number => Math.round(Math.min(Math.max(w, 260), window.innerWidth * 0.7))
@@ -48,6 +60,34 @@ export function App(): JSX.Element {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
   // Tabs with unsaved row edits. Only read when closing, so a ref (no re-render) is enough.
   const dirtyTabs = useRef(new Set<string>())
+
+  // ---- Table palette (Ctrl/Cmd+P) ----
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [recentTables, setRecentTables] = useState<string[]>(loadRecentTables)
+  const focusBeforePalette = useRef<Element | null>(null)
+  const connected = conn !== null
+  useEffect(() => {
+    // Capture phase: runs before Monaco and the grid get the key.
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!connected) return
+        setPaletteOpen((open) => {
+          if (!open) focusBeforePalette.current = document.activeElement
+          return !open
+        })
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [connected])
+  const closePalette = (): void => {
+    setPaletteOpen(false)
+    // Give focus back to where the user was (editor, grid…).
+    const el = focusBeforePalette.current
+    if (el instanceof HTMLElement) requestAnimationFrame(() => el.focus())
+  }
 
   // ---- Value inspector (right panel) ----
   const [inspectorOpen, setInspectorOpen] = useState(false)
@@ -115,6 +155,7 @@ export function App(): JSX.Element {
     setTabs([QUERY_TAB])
     setActiveId('query')
     setInspected(null)
+    setPaletteOpen(false)
   }
 
   const execute = useCallback(async () => {
@@ -167,6 +208,16 @@ export function App(): JSX.Element {
   }
 
   const openTable = (schema: string, table: string, view: TableViewMode): void => {
+    const key = `${schema}.${table}`
+    setRecentTables((prev) => {
+      const next = [key, ...prev.filter((k) => k !== key)].slice(0, MAX_RECENT)
+      try {
+        localStorage.setItem(RECENT_TABLES_KEY, JSON.stringify(next))
+      } catch {
+        /* not persisted; fine */
+      }
+      return next
+    })
     const id = `table:${schema}.${table}`
     setTabs((ts) =>
       ts.some((t) => t.id === id)
@@ -303,6 +354,18 @@ export function App(): JSX.Element {
         </footer>
 
         {!conn && <ConnectDialog onConnected={onConnected} />}
+        {conn && paletteOpen && (
+          <TablePalette
+            schemas={schemas}
+            currentDb={currentDb}
+            recent={recentTables}
+            onClose={closePalette}
+            onOpen={(schema, table, view) => {
+              setPaletteOpen(false)
+              openTable(schema, table, view)
+            }}
+          />
+        )}
       </div>
     </InspectorContext.Provider>
   )
