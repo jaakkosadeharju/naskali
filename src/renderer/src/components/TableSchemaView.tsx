@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { monaco, SQL_LANG } from '../monacoSetup'
+import { editorLanguage, monaco } from '../monacoSetup'
 import type { TableDetails } from '../../../shared/types'
 
 interface Props {
@@ -12,7 +12,7 @@ export function TableSchemaView({ details: d, onOpenSql }: Props): JSX.Element {
   useEffect(() => {
     let live = true
     // colorize() escapes the text itself, so its HTML output is safe to inject.
-    void monaco.editor.colorize(d.ddl, SQL_LANG, { tabSize: 2 }).then((html) => live && setDdlHtml(html))
+    void monaco.editor.colorize(d.ddl, editorLanguage(), { tabSize: 2 }).then((html) => live && setDdlHtml(html))
     return () => {
       live = false
     }

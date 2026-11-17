@@ -1,6 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
-import { MySqlSession } from './mysql'
+import { createDriver } from './drivers'
+import type { Driver } from './drivers/types'
+import { applyChanges, previewChanges, tableData } from './session'
 import { forgetConnection, loadConnection, saveConnection } from './connectionStore'
 import type { ChangeSet, ConnectionConfig, IpcResult, TableDataRequest } from '../shared/types'
 // `?asset` makes electron-vite copy the file into the build and give us its runtime path.
@@ -8,7 +10,12 @@ import icon from '../../resources/icon.png?asset'
 // splash.html loads splash.png from the same folder (resources/ is packaged as-is).
 import splashHtml from '../../resources/splash.html?asset'
 
-const session = new MySqlSession()
+/** The connected database, if any. */
+let driver: Driver | null = null
+const requireDriver = (): Driver => {
+  if (!driver) throw new Error('Not connected')
+  return driver
+}
 
 /** Keep the splash up at least this long so it doesn't just flash by. */
 const MIN_SPLASH_MS = 1200
@@ -104,24 +111,45 @@ function handle<A extends unknown[], T>(channel: string, fn: (...args: A) => Pro
 }
 
 handle('db:connect', async (cfg: ConnectionConfig, remember: boolean) => {
-  const info = await session.connect(cfg)
+  await driver?.disconnect()
+  driver = null
+  const next = createDriver(cfg)
+  const info = await next.connect()
+  driver = next
   if (remember) await saveConnection(cfg)
   else await forgetConnection()
   return info
 })
-handle('db:disconnect', () => session.disconnect())
-handle('db:loadSaved', () => loadConnection())
-handle('db:introspect', () => session.introspect())
-handle('db:query', async (sql: string) => {
-  const result = await session.query(sql)
-  return { result, database: await session.currentDatabase() }
+handle('db:disconnect', async () => {
+  await driver?.disconnect()
+  driver = null
 })
-handle('db:cancel', () => session.cancel())
-handle('db:use', (name: string) => session.useDatabase(name))
-handle('db:tableDetails', (schema: string, table: string) => session.tableDetails(schema, table))
-handle('db:tableData', (req: TableDataRequest) => session.tableData(req))
-handle('db:previewChanges', (cs: ChangeSet) => session.previewChanges(cs))
-handle('db:applyChanges', (cs: ChangeSet) => session.applyChanges(cs))
+handle('db:loadSaved', () => loadConnection())
+handle('db:introspect', () => requireDriver().introspect())
+handle('db:query', async (sql: string) => {
+  const d = requireDriver()
+  const result = await d.query(sql)
+  return { result, schema: await d.currentSchema() }
+})
+handle('db:cancel', () => requireDriver().cancel())
+handle('db:use', (name: string) => requireDriver().useSchema(name))
+handle('db:pickSqliteFile', async () => {
+  const win = BrowserWindow.getFocusedWindow()
+  const options: Electron.OpenDialogOptions = {
+    title: 'Open SQLite database',
+    properties: ['openFile', 'promptToCreate'],
+    filters: [
+      { name: 'SQLite databases', extensions: ['sqlite', 'sqlite3', 'db', 'db3', 's3db', 'sl3'] },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  }
+  const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+  return r.canceled ? null : (r.filePaths[0] ?? null)
+})
+handle('db:tableDetails', (schema: string, table: string) => requireDriver().tableDetails(schema, table))
+handle('db:tableData', (req: TableDataRequest) => tableData(requireDriver(), req))
+handle('db:previewChanges', (cs: ChangeSet) => previewChanges(requireDriver(), cs))
+handle('db:applyChanges', (cs: ChangeSet) => applyChanges(requireDriver(), cs))
 
 app.whenReady().then(() => {
   createWindow({ withSplash: true })
@@ -131,6 +159,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  void session.disconnect()
+  void driver?.disconnect()
   if (process.platform !== 'darwin') app.quit()
 })

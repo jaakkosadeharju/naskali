@@ -1,4 +1,4 @@
-import { monaco, SQL_LANG } from './monacoSetup'
+import { monaco, SQL_LANGUAGES } from './monacoSetup'
 import type { SchemaInfo, TableInfo } from '../../shared/types'
 
 // Schema-aware autocomplete. The provider is registered once; the app pushes
@@ -57,7 +57,7 @@ function tablesInQuery(sql: string): Map<string, TableInfo> {
   return refs
 }
 
-monaco.languages.registerCompletionItemProvider(SQL_LANG, {
+const provider: monaco.languages.CompletionItemProvider = {
   triggerCharacters: ['.'],
   provideCompletionItems(model, position) {
     const K = monaco.languages.CompletionItemKind
@@ -117,4 +117,6 @@ monaco.languages.registerCompletionItemProvider(SQL_LANG, {
     }
     return { suggestions }
   }
-})
+}
+
+for (const lang of SQL_LANGUAGES) monaco.languages.registerCompletionItemProvider(lang, provider)

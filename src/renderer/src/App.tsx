@@ -9,11 +9,20 @@ import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
 import { TablePalette } from './components/TablePalette'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
-import type { ConnectionConfig, QueryResult, RowFilter, SchemaInfo } from '../../shared/types'
+import { DRIVER_LABELS, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo } from '../../shared/types'
+import { setEditorDialect } from './monacoSetup'
 
 interface Connection {
+  /** e.g. "dev@127.0.0.1:5432/shop" or "shop.sqlite" */
   label: string
-  serverVersion: string
+  info: ConnectionInfo
+}
+
+function connectionLabel(cfg: ConnectionConfig, info: ConnectionInfo): string {
+  if (cfg.driver === 'sqlite') return cfg.file.split(/[\\/]/).pop() || cfg.file
+  // MySQL's database is the switchable schema (shown separately); others are fixed per connection.
+  const db = cfg.driver !== 'mysql' && info.database ? `/${info.database}` : ''
+  return `${cfg.user}@${cfg.host}:${cfg.port}${db}`
 }
 
 type RunState =
@@ -138,9 +147,10 @@ export function App(): JSX.Element {
   }, [])
 
   const onConnected = useCallback(
-    (cfg: ConnectionConfig, info: { serverVersion: string; database: string | null }) => {
-      setConn({ label: `${cfg.user}@${cfg.host}:${cfg.port}`, serverVersion: info.serverVersion })
-      updateDb(info.database)
+    (cfg: ConnectionConfig, info: ConnectionInfo) => {
+      setConn({ label: connectionLabel(cfg, info), info })
+      setEditorDialect(info.driver)
+      updateDb(info.schema)
       void refreshSchema()
     },
     [refreshSchema, updateDb]
@@ -172,13 +182,14 @@ export function App(): JSX.Element {
       return
     }
     setRun({ status: 'done', sql, result: r.value.result })
-    updateDb(r.value.database)
+    updateDb(r.value.schema)
     // DDL changes the schema; keep the tree and autocomplete in sync.
     if (/^\s*(create|alter|drop|rename|truncate)\b/i.test(sql)) void refreshSchema()
   }, [run.status, refreshSchema, updateDb])
 
-  const useDatabase = async (name: string): Promise<void> => {
-    const r = await window.api.useDatabase(name)
+  const useSchema = async (name: string): Promise<void> => {
+    if (!conn?.info.capabilities.switchSchema) return
+    const r = await window.api.useSchema(name)
     if (r.ok) updateDb(name)
   }
 
@@ -276,7 +287,7 @@ export function App(): JSX.Element {
           {conn && (
             <>
               <span className="conn-label">
-                {conn.label} · {currentDb ?? 'no database'} · MySQL {conn.serverVersion}
+                {conn.label} · {currentDb ?? 'no schema'} · {DRIVER_LABELS[conn.info.driver]} {conn.info.serverVersion}
               </span>
               <button onClick={disconnect}>Disconnect</button>
             </>
@@ -288,7 +299,7 @@ export function App(): JSX.Element {
             key={conn?.label ?? 'none'}
             schemas={schemas}
             currentDb={currentDb}
-            onUseDatabase={useDatabase}
+            onUseDatabase={conn?.info.capabilities.switchSchema ? useSchema : undefined}
             onInsert={insertText}
             onOpenTable={openTable}
             onRefresh={refreshSchema}
@@ -414,8 +425,13 @@ function StatusText({ run }: { run: RunState }): JSX.Element {
     const r = run.result
     return (
       <span>
-        {r.rowCount.toLocaleString()} rows · {r.elapsedMs} ms
-        {r.truncated && <span className="warn"> · showing first {r.rows.length.toLocaleString()} rows</span>}
+        {r.rowCount === null ? `${r.rows.length.toLocaleString()}+` : r.rowCount.toLocaleString()} rows · {r.elapsedMs} ms
+        {r.truncated && (
+          <span className="warn">
+            {' '}
+            · showing first {r.rows.length.toLocaleString()} rows{r.rowCount === null ? ' (more available)' : ''}
+          </span>
+        )}
       </span>
     )
   }

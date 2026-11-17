@@ -15,7 +15,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CellValue, ResultField } from '../../../shared/types'
 import { useInspector } from '../inspector'
 
-const NUMERIC = new Set(['TINY', 'SHORT', 'LONG', 'LONGLONG', 'INT24', 'FLOAT', 'DOUBLE', 'DECIMAL', 'NEWDECIMAL', 'YEAR'])
 
 const darkTheme: Partial<Theme> = {
   accentColor: '#3794ff',
@@ -246,7 +245,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
     [editing, inspector, gridId]
   )
 
-  const numeric = useMemo(() => fields.map((f) => NUMERIC.has(f.type)), [fields])
+  const numeric = useMemo(() => fields.map((f) => f.numeric), [fields])
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {

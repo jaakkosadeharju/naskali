@@ -1,11 +1,52 @@
 // Types shared between the main process, preload and renderer.
 
-export interface ConnectionConfig {
+export type DriverKind = 'mysql' | 'postgres' | 'mssql' | 'sqlite'
+
+export const DRIVER_LABELS: Record<DriverKind, string> = {
+  mysql: 'MySQL',
+  postgres: 'PostgreSQL',
+  mssql: 'SQL Server',
+  sqlite: 'SQLite'
+}
+
+/** A client/server database (MySQL, PostgreSQL, SQL Server). */
+export interface ServerConnectionConfig {
+  driver: 'mysql' | 'postgres' | 'mssql'
   host: string
   port: number
   user: string
   password: string
+  /** MySQL: default database (optional). PostgreSQL/SQL Server: the database to connect to. */
   database?: string
+  /** PostgreSQL: connect with TLS. */
+  ssl?: boolean
+  /** SQL Server: accept a self-signed certificate (typical for local/dev servers). */
+  trustServerCertificate?: boolean
+}
+
+export interface SqliteConnectionConfig {
+  driver: 'sqlite'
+  /** Path to the database file. */
+  file: string
+  readOnly?: boolean
+  /** Create the file if it doesn't exist. */
+  create?: boolean
+}
+
+export type ConnectionConfig = ServerConnectionConfig | SqliteConnectionConfig
+
+export interface ConnectionInfo {
+  driver: DriverKind
+  /** e.g. "8.4.13" */
+  serverVersion: string
+  /** The connected database (PostgreSQL/SQL Server/SQLite file name); MySQL: current default database. */
+  database: string | null
+  /** The current schema the tree highlights and autocomplete prefers (MySQL: the database). */
+  schema: string | null
+  capabilities: {
+    /** Double-clicking a schema switches to it (MySQL `USE`, PostgreSQL `search_path`). */
+    switchSchema: boolean
+  }
 }
 
 export interface ColumnInfo {
@@ -29,6 +70,8 @@ export interface SchemaInfo {
 export interface ResultField {
   name: string
   type: string
+  /** Right-align in grids. */
+  numeric: boolean
 }
 
 /** Cell values are normalised to JSON-friendly primitives before crossing IPC. */
@@ -39,7 +82,8 @@ export type QueryResult =
       kind: 'rows'
       fields: ResultField[]
       rows: CellValue[][]
-      rowCount: number
+      /** Total rows produced; null when the result was cut off without counting the rest. */
+      rowCount: number | null
       truncated: boolean
       elapsedMs: number
     }
@@ -147,14 +191,16 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
 /** The API the preload script exposes to the renderer as `window.api`. */
 export interface SqlApi {
-  connect(config: ConnectionConfig, remember: boolean): Promise<IpcResult<{ serverVersion: string; database: string | null }>>
+  connect(config: ConnectionConfig, remember: boolean): Promise<IpcResult<ConnectionInfo>>
   disconnect(): Promise<IpcResult<void>>
   loadSavedConnection(): Promise<IpcResult<(ConnectionConfig & { remember: boolean }) | null>>
   introspect(): Promise<IpcResult<SchemaInfo[]>>
-  /** Also returns the session's current database, since the SQL may have run `USE ...`. */
-  query(sql: string): Promise<IpcResult<{ result: QueryResult; database: string | null }>>
+  /** Also returns the session's current schema, since the SQL may have run `USE …` / `SET search_path …`. */
+  query(sql: string): Promise<IpcResult<{ result: QueryResult; schema: string | null }>>
   cancel(): Promise<IpcResult<void>>
-  useDatabase(name: string): Promise<IpcResult<void>>
+  useSchema(name: string): Promise<IpcResult<void>>
+  /** Shows a file picker for a SQLite database; null when cancelled. */
+  pickSqliteFile(): Promise<IpcResult<string | null>>
   tableDetails(schema: string, table: string): Promise<IpcResult<TableDetails>>
   tableData(req: TableDataRequest): Promise<IpcResult<TableDataResult>>
   /** The statements `applyChanges` would run, with values inlined (for display). */

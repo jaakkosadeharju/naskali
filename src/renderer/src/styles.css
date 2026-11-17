@@ -930,3 +930,12 @@ kbd {
   font-size: 13px;
   color: #9db8e6;
 }
+
+/* Connect dialog: database type picker */
+.driver-picker {
+  display: flex;
+}
+.driver-picker button {
+  flex: 1;
+  padding: 6px 4px;
+}

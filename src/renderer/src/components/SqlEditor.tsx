@@ -1,7 +1,7 @@
 import Editor from '@monaco-editor/react'
 import { useEffect, useRef } from 'react'
-import { monaco, SQL_LANG } from '../monacoSetup'
-import { statementAt } from '../sqlSplit'
+import { editorDriver, editorLanguage, monaco } from '../monacoSetup'
+import { SPLIT_RULES, statementAt } from '../sqlSplit'
 
 type CodeEditor = monaco.editor.IStandaloneCodeEditor
 
@@ -35,7 +35,7 @@ export function sqlToRun(editor: CodeEditor): string | null {
   if (!sel.isEmpty()) {
     range = sel
   } else {
-    const stmt = statementAt(model.getValue(), model.getOffsetAt(sel.getPosition()))
+    const stmt = statementAt(model.getValue(), model.getOffsetAt(sel.getPosition()), SPLIT_RULES[editorDriver()])
     if (!stmt) return null
     const s = model.getPositionAt(stmt.start)
     const e = model.getPositionAt(stmt.end)
@@ -60,7 +60,7 @@ export function SqlEditor({ onMount, onRun }: Props): JSX.Element {
 
   return (
     <Editor
-      defaultLanguage={SQL_LANG}
+      defaultLanguage={editorLanguage()}
       defaultValue={loadDraft()}
       theme="vs-dark"
       options={{
