@@ -16,6 +16,15 @@ export interface InspectedValue {
   type: string
   /** Where it came from, e.g. "shop.customers · row 12". */
   source: string
+  /** Set when the cell can be edited: stages a pending change for it. */
+  onChange?: (value: CellValue) => void
+  nullable?: boolean
+  /** The cell has a pending change (or belongs to a new row). */
+  edited?: boolean
+  /** Drops the cell's pending change (for a new row: back to DEFAULT). */
+  onRevert?: () => void
+  /** Why the value can't be edited, when it can't. */
+  readOnlyReason?: string
 }
 
 export interface InspectorApi {

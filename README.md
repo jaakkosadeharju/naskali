@@ -46,6 +46,11 @@ Connect with `127.0.0.1:3306`, user `dev`, password `dev`, database `shop`.
   cell of any result or data grid and follows the selection, also live while you edit. JSON (JSON columns, and text
   that holds a JSON object/array) gets a collapsible tree – with JSON strings nested inside JSON parsed too – plus
   highlighted *Formatted* and *Raw* views; other values show as wrapping text. Resizable (width remembered), closable
+- **Editing in the value inspector** (editable table cells): **✎ Edit** opens a text editor (JSON: live validation with
+  line/column errors, Format/Minify; invalid JSON can't be stored in a JSON column; Ctrl+Enter applies, Esc cancels),
+  or double-click a value in the JSON tree to change just that leaf – also inside JSON strings nested in JSON. Edited
+  JSON keeps the original's style (compact vs. pretty-printed). **Set NULL** and **Revert** (new-row cell → `DEFAULT`)
+  are there too. Everything becomes a pending change, saved with Accept like grid edits
 - Schema-aware autocomplete: tables, columns, `alias.` → columns, `db.` → tables
 - Remembers the last connection; the password is stored only if an OS keyring is available (`safeStorage`)
 
@@ -72,7 +77,7 @@ Database drivers live only in the main process. The renderer is sandboxed (`cont
 
 - One connection and one query editor; no query history or export yet
 - No optimistic-concurrency check beyond "row still exists" (a concurrent change to the same row is overwritten);
-  a new row's cell can't be set back to `DEFAULT` once edited (remove and re-add the row); no sorting by column header yet;
+  no sorting by column header yet;
   `COUNT(*)` for the pager can be slow on huge tables
 - Editing an empty value into a NULL cell is treated as "no change" (use a SQL statement to store `''` there)
 - All rows are kept in memory up to the cap; a real version should page or stream into the grid
