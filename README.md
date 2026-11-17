@@ -8,7 +8,7 @@ A desktop SQL client proof of concept: **Electron + React + Monaco + Glide Data 
 | MySQL / MariaDB | `mysql2` | schemas = databases; double-click one to `USE` it |
 | PostgreSQL | `pg` + `pg-cursor` | schemas of the connected database; double-click sets `search_path` |
 | SQL Server | `mssql` (tedious) | schemas of the connected database (`dbo`, …) |
-| SQLite | Node's built-in `node:sqlite` | `main` + attached databases; no native module needed |
+| SQLite | Node's built-in `node:sqlite` | Table tools browse `main`. Attached databases are accessible in the editor session. |
 
 All drivers are pure JavaScript, so packaging needs no native rebuilds.
 
@@ -92,9 +92,9 @@ src/
     connectionStore.ts  saved connection (userData/connection.json)
   preload/    contextBridge → window.api (the only renderer↔Node bridge)
   shared/     types shared across processes (SqlApi, QueryResult, …) + editing rules
+    sqlSplit.ts         statement splitter with per-dialect quoting and comment rules
   renderer/   React UI (sandboxed, no Node)
     src/completion.ts   Monaco completion provider
-    src/sqlSplit.ts     statement splitter (per-dialect rules: $$ bodies, [idents], # comments…)
     src/components/     SqlEditor, ResultsGrid, SchemaTree, ConnectDialog,
                         TableView (+ FilterBar, TableSchemaView, SqlPreviewModal)
 ```
@@ -115,5 +115,5 @@ Database drivers live only in the main process. The renderer is sandboxed (`cont
   not the server's original definition; views show their real definition
 - SQL Server `decimal`/`numeric` values arrive as JS numbers (tedious), so very large/precise values lose precision;
   `date`/`time` columns show as full timestamps. SQL Server can't switch schemas per session (qualify names instead)
-- SQLite integers beyond 2^53 lose precision (they aren't read as BigInt)
+- SQLite integers outside JavaScript's safe range are displayed as exact decimal text. Pages with primary keys that cannot round-trip through the grid are read-only.
 - PostgreSQL/SQL Server/SQLite results cut off at 100k rows don't count the remaining rows (MySQL does)

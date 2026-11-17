@@ -1,7 +1,7 @@
 import Editor from '@monaco-editor/react'
 import { useEffect, useRef } from 'react'
 import { editorDriver, editorLanguage, monaco } from '../monacoSetup'
-import { SPLIT_RULES, statementAt } from '../sqlSplit'
+import { SPLIT_RULES, statementAt } from '../../../shared/sqlSplit'
 
 type CodeEditor = monaco.editor.IStandaloneCodeEditor
 

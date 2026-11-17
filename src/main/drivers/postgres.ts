@@ -123,7 +123,7 @@ export class PostgresDriver implements Driver {
       )
       const elapsedMs = Math.round(performance.now() - started)
       if (!result.fields?.length) {
-        return { kind: 'ok', affectedRows: result.rowCount ?? 0, insertId: 0, info: result.command ?? '', elapsedMs }
+        return { kind: 'ok', affectedRows: result.rowCount ?? 0, insertId: null, info: result.command ?? '', elapsedMs }
       }
       const truncated = rows.length > MAX_ROWS
       const kept = truncated ? rows.slice(0, MAX_ROWS) : rows

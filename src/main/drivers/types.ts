@@ -8,6 +8,8 @@ export const MAX_ROWS = 100_000
 export interface Rows {
   fields: ResultField[]
   rows: CellValue[][]
+  /** Columns containing values that cannot safely be reused as row keys. */
+  unsafeKeyColumns?: ReadonlySet<string>
 }
 
 /** Runs one statement inside a transaction; resolves to the number of affected (matched) rows. */

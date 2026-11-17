@@ -8,6 +8,9 @@ const TYPE_NAMES = (mysql as unknown as { Types: Record<number, string> }).Types
 const NUMERIC_TYPES = new Set(['DECIMAL', 'NEWDECIMAL', 'TINY', 'SHORT', 'LONG', 'LONGLONG', 'INT24', 'FLOAT', 'DOUBLE', 'YEAR'])
 const SYSTEM_SCHEMAS = ['mysql', 'information_schema', 'performance_schema', 'sys']
 
+// With bigNumberStrings enabled, mysql2 can return a string despite its declaration.
+type QueryHeader = Omit<ResultSetHeader, 'insertId'> & { insertId: number | string }
+
 function toField(f: FieldPacket): ResultField {
   const type = TYPE_NAMES[f.type ?? -1] ?? String(f.type)
   return { name: f.name, type, numeric: NUMERIC_TYPES.has(type) }
@@ -114,7 +117,7 @@ export class MySqlDriver implements Driver {
       let fields: FieldPacket[] | null = null
       const rows: CellValue[][] = []
       let rowCount = 0
-      let header: ResultSetHeader | null = null
+      let header: QueryHeader | null = null
       let failed = false
 
       const q = conn.query({ sql, rowsAsArray: true })
@@ -132,7 +135,7 @@ export class MySqlDriver implements Driver {
           rowCount++
           if (rows.length < MAX_ROWS) rows.push(r.map(normalise))
         } else if (!header) {
-          header = r as ResultSetHeader
+          header = r as QueryHeader
         }
       })
       q.on('end', () => {
@@ -142,8 +145,15 @@ export class MySqlDriver implements Driver {
         if (fields) {
           resolve({ kind: 'rows', fields: fields.map(toField), rows, rowCount, truncated: rowCount > rows.length, elapsedMs })
         } else {
-          const h = header as ResultSetHeader | null
-          resolve({ kind: 'ok', affectedRows: h?.affectedRows ?? 0, insertId: Number(h?.insertId ?? 0), info: h?.info ?? '', elapsedMs })
+          const h = header as QueryHeader | null
+          const insertId = h?.insertId
+          resolve({
+            kind: 'ok',
+            affectedRows: h?.affectedRows ?? 0,
+            insertId: insertId === 0 || insertId === '0' ? null : insertId ?? null,
+            info: h?.info ?? '',
+            elapsedMs
+          })
         }
       })
     })

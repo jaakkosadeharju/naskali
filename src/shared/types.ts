@@ -89,8 +89,8 @@ export type QueryResult =
     }
   | {
       kind: 'ok'
-      affectedRows: number
-      insertId: number
+      affectedRows: number | null
+      insertId: number | string | null
       info: string
       elapsedMs: number
     }
@@ -105,12 +105,15 @@ export const FILTER_OPS = [
 export type FilterOp = (typeof FILTER_OPS)[number]
 /** Operators that take no value. */
 export const UNARY_OPS: ReadonlySet<FilterOp> = new Set(['IS NULL', 'IS NOT NULL'])
+export const COMPARISON_OPS: ReadonlySet<FilterOp> = new Set(['=', '!=', '<', '<=', '>', '>=', 'IN', 'NOT IN'])
 
 export interface RowFilter {
   column: string
   op: FilterOp
   /** For IN / NOT IN: comma-separated list. */
   value: string
+  /** SQLite comparison and list operand type. */
+  operandType?: 'number' | 'text'
 }
 
 export interface TableDataRequest {
@@ -130,6 +133,7 @@ export interface TableDataResult {
   /** The executed SELECT with values inlined, for display / "open in editor". */
   sql: string
   elapsedMs: number
+  editDisabledReason?: string
 }
 
 export interface TableDetails {
@@ -139,6 +143,7 @@ export interface TableDetails {
   engine: string | null
   rowsEstimate: number | null
   comment: string
+  editDisabledReason?: string
   columns: {
     name: string
     type: string

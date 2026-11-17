@@ -1,4 +1,4 @@
-import type { DriverKind } from '../../shared/types'
+import type { DriverKind } from './types'
 
 export interface Statement {
   text: string

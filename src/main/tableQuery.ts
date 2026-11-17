@@ -1,4 +1,4 @@
-import { FILTER_OPS, type CellValue, type ChangeSet, type FilterOp, type RowFilter } from '../shared/types'
+import { FILTER_OPS, type CellValue, type ChangeSet, type RowFilter } from '../shared/types'
 import { isEditableColumn } from '../shared/editing'
 import { bind, escapeLike, qualify, type Param, type Sql, type SqlDialect } from './dialect'
 
@@ -16,9 +16,22 @@ function splitList(v: string): string[] {
     .filter((x) => x !== '')
 }
 
-function condition(d: SqlDialect, col: string, op: FilterOp, value: string, params: Param[]): string {
+const DECIMAL = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[+-]?[0-9]+)?$/i
+
+function condition(d: SqlDialect, column: ColumnMeta, filter: RowFilter, params: Param[]): string {
+  const col = d.quote(column.name)
+  const { op, value = '', operandType } = filter
   const target = d.likeTarget(col)
   const like = (pattern: string, not = false): string => `${target} ${not ? 'NOT ' : ''}LIKE ${bind(params, pattern)} ESCAPE '!'`
+  const noAffinity = !column.type || (/BLOB/i.test(column.type) && !/INT|CHAR|CLOB|TEXT/i.test(column.type))
+  const operand = (input: string): string => {
+    if (d.kind !== 'sqlite' || operandType === 'text' || (operandType !== 'number' && !noAffinity)) return bind(params, input)
+    const trimmed = input.trim()
+    // Unary + removes CAST's affinity so SQLite won't also coerce the column.
+    if (DECIMAL.test(trimmed)) return `+CAST(${bind(params, trimmed)} AS NUMERIC)`
+    if (operandType === 'number') throw new Error('Enter a valid number for the filter')
+    return bind(params, input)
+  }
   switch (op) {
     case 'IS NULL':
     case 'IS NOT NULL':
@@ -39,22 +52,24 @@ function condition(d: SqlDialect, col: string, op: FilterOp, value: string, para
     case 'NOT IN': {
       const items = splitList(value)
       if (items.length === 0) throw new Error(`${op} needs a comma-separated list of values`)
-      return `${col} ${op} (${items.map((v) => bind(params, v)).join(', ')})`
+      return `${col} ${op} (${items.map(operand).join(', ')})`
     }
     default:
-      return `${col} ${op} ${bind(params, value)}`
+      return `${col} ${op} ${operand(value)}`
   }
 }
 
 /** ` WHERE …` (or empty) for the given filters. */
-export function buildWhere(d: SqlDialect, filters: RowFilter[], match: 'all' | 'any', columns: ReadonlySet<string>): Sql {
+export function buildWhere(d: SqlDialect, filters: RowFilter[], match: 'all' | 'any', columns: ColumnMeta[]): Sql {
   const params: Param[] = []
   const parts: string[] = []
+  const byName = new Map(columns.map((column) => [column.name, column]))
   for (const f of filters) {
     if (!f.column) continue // incomplete row in the UI
-    if (!columns.has(f.column)) throw new Error(`Unknown column: ${f.column}`)
+    const column = byName.get(f.column)
+    if (!column) throw new Error(`Unknown column: ${f.column}`)
     if (!VALID_OPS.has(f.op)) throw new Error(`Unsupported operator: ${f.op}`)
-    parts.push(condition(d, d.quote(f.column), f.op, f.value ?? '', params))
+    parts.push(condition(d, column, f, params))
   }
   if (parts.length === 0) return { text: '', params }
   return { text: ' WHERE ' + parts.join(match === 'any' ? ' OR ' : ' AND '), params }
