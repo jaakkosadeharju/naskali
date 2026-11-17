@@ -1,0 +1,15 @@
+appId: com.example.sqltool
+productName: SQL Tool
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+linux:
+  target: [AppImage, deb]
+  category: Development
+  maintainer: SQL Tool POC
+mac:
+  target: dmg
+win:
+  target: nsis
