@@ -51,6 +51,9 @@ Connect with `127.0.0.1:3306`, user `dev`, password `dev`, database `shop`.
   or double-click a value in the JSON tree to change just that leaf – also inside JSON strings nested in JSON. Edited
   JSON keeps the original's style (compact vs. pretty-printed). **Set NULL** and **Revert** (new-row cell → `DEFAULT`)
   are there too. Everything becomes a pending change, saved with Accept like grid edits
+- **Table palette** – **Ctrl+P** (⌘P on macOS) from anywhere: fuzzy search over all tables (word-start acronyms like
+  `oi` → `order_items`; type `schema.table` to search across databases), recently opened tables first.
+  Enter opens the Data view, Ctrl/⌘+Enter the Schema view, Esc returns to where you were
 - Schema-aware autocomplete: tables, columns, `alias.` → columns, `db.` → tables
 - Remembers the last connection; the password is stored only if an OS keyring is available (`safeStorage`)
 
