@@ -40,8 +40,9 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [color, setColor] = useState<ConnectionColor>('blue')
-  const [busy, setBusy] = useState<'loading' | 'connecting' | 'saving' | 'removing' | null>('loading')
+  const [busy, setBusy] = useState<'loading' | 'connecting' | 'testing' | 'saving' | 'removing' | null>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [testPassed, setTestPassed] = useState(false)
 
   function selectConnection(connection?: SavedConnection): void {
     setSelectedId(connection?.id ?? null)
@@ -50,6 +51,7 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
     setDriver(connection?.config.driver ?? 'mysql')
     setDrafts(connection ? { ...DEFAULTS, [connection.config.driver]: connection.config } : { ...DEFAULTS })
     setError(null)
+    setTestPassed(false)
   }
 
   useEffect(() => {
@@ -68,8 +70,11 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
   }, [])
 
   const cfg = drafts[driver]
-  const update = (patch: Partial<ServerConnectionConfig> | Partial<SqliteConnectionConfig>): void =>
+  const update = (patch: Partial<ServerConnectionConfig> | Partial<SqliteConnectionConfig>): void => {
     setDrafts((d) => ({ ...d, [driver]: { ...d[driver], ...patch } as ConnectionConfig }))
+    setError(null)
+    setTestPassed(false)
+  }
 
   async function browse(): Promise<void> {
     const r = await window.api.pickSqliteFile()
@@ -79,7 +84,23 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault()
     if (busy) return
-    if ((e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'save') {
+    const action = (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value')
+    if (action === 'test') {
+      setBusy('testing')
+      setError(null)
+      setTestPassed(false)
+      try {
+        const r = await window.api.testConnection(cfg)
+        if (r.ok) setTestPassed(true)
+        else setError(r.error)
+      } catch (error) {
+        setError(error instanceof Error ? error.message : String(error))
+      } finally {
+        setBusy(null)
+      }
+      return
+    }
+    if (action === 'save') {
       setBusy('saving')
       setError(null)
       const r = await window.api.saveConnection(selectedId, name, cfg, color)
@@ -96,6 +117,7 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
 
     setBusy('connecting')
     setError(null)
+    setTestPassed(false)
     const r = await window.api.connect(cfg)
     setBusy(null)
     if (r.ok) onConnected(cfg, r.value, color)
@@ -172,6 +194,7 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
                 onClick={() => {
                   setDriver(d)
                   setError(null)
+                  setTestPassed(false)
                 }}
               >
                 {DRIVER_LABELS[d]}
@@ -260,12 +283,16 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
             <button type="submit" className="primary">
               {busy === 'connecting' ? 'Connecting…' : 'Connect'}
             </button>
+            <button type="submit" value="test">
+              {busy === 'testing' ? 'Testing…' : 'Test connection'}
+            </button>
             <button type="submit" value="save" disabled={!name.trim()}>
               {busy === 'saving' ? 'Saving…' : 'Save connection'}
             </button>
             {selectedId && <button type="button" onClick={() => void remove()}>Remove</button>}
           </div>
         </fieldset>
+        {testPassed && <div className="connection-test-success" role="status">Connection successful.</div>}
         {error && <div className="error" role="alert">{error}</div>}
       </form>
     </div>

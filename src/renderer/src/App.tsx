@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { monaco } from './monacoSetup'
 import { completionState } from './completion'
 import { ConnectDialog } from './components/ConnectDialog'
@@ -38,6 +38,31 @@ type Tab =
   | QueryTab
   | { id: string; kind: 'table'; schema: string; table: string; view: TableViewMode; filters?: RowFilter[] }
 
+interface TabDrag {
+  pointerId: number
+  from: number
+  startX: number
+  startScroll: number
+  bounds: { id: string; left: number; width: number }[]
+  to: number
+  moved: boolean
+}
+
+interface TabDrop {
+  from: number
+  to: number
+  width: number
+  offset: number
+  slotLeft: number
+}
+
+function tabDragOffset(drag: TabDrop, index: number): number {
+  if (index === drag.from) return drag.offset
+  if (index > drag.from && index <= drag.to) return -drag.width
+  if (index < drag.from && index >= drag.to) return drag.width
+  return 0
+}
+
 const filterSummary = (filters: RowFilter[]): string => filters.map((f) => `${f.column} = ${f.value}`).join(', ')
 
 const FIRST_QUERY: QueryTab = { id: 'query:1', kind: 'query', number: 1, run: { status: 'idle' } }
@@ -72,6 +97,9 @@ export function App(): JSX.Element {
   const [activeId, setActiveId] = useState(FIRST_QUERY.id)
   const [disconnecting, setDisconnecting] = useState(false)
   const tabbar = useRef<HTMLElement>(null)
+  const tabDrag = useRef<TabDrag | null>(null)
+  const suppressTabClick = useRef(false)
+  const [tabDrop, setTabDrop] = useState<TabDrop | null>(null)
   const editors = useRef(new Map<string, monaco.editor.IStandaloneCodeEditor>())
   const nextQueryNumber = useRef(2)
   const lastQueryId = useRef(FIRST_QUERY.id)
@@ -294,6 +322,63 @@ export function App(): JSX.Element {
   const setTableView = (id: string, view: TableViewMode): void =>
     setTabs((ts) => ts.map((t) => (t.id === id && t.kind === 'table' ? { ...t, view } : t)))
 
+  const moveTab = (id: string, targetId: string, after: boolean): void => {
+    if (id === targetId) return
+    setTabs((ts) => {
+      const moved = ts.find((tab) => tab.id === id)
+      const remaining = ts.filter((tab) => tab.id !== id)
+      const target = remaining.findIndex((tab) => tab.id === targetId)
+      if (!moved || target < 0) return ts
+      remaining.splice(target + Number(after), 0, moved)
+      return remaining
+    })
+  }
+
+  const startTabDrag = (e: PointerEvent<HTMLButtonElement>, from: number): void => {
+    if (e.button !== 0 || !e.isPrimary) return
+    suppressTabClick.current = false
+    const bar = tabbar.current
+    if (!bar || tabs.length < 2) return
+    const bounds = Array.from(bar.querySelectorAll<HTMLElement>('.tab'), (element, index) => ({
+      id: tabs[index].id,
+      left: element.offsetLeft,
+      width: element.offsetWidth
+    }))
+    tabDrag.current = { pointerId: e.pointerId, from, startX: e.clientX, startScroll: bar.scrollLeft, bounds, to: from, moved: false }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const previewTabDrag = (e: PointerEvent<HTMLButtonElement>): void => {
+    const drag = tabDrag.current
+    const bar = tabbar.current
+    if (!drag || drag.pointerId !== e.pointerId || !bar) return
+    const dx = e.clientX - drag.startX + bar.scrollLeft - drag.startScroll
+    if (!drag.moved && Math.abs(dx) < 5) return
+    drag.moved = true
+    suppressTabClick.current = true
+
+    const source = drag.bounds[drag.from]
+    const last = drag.bounds[drag.bounds.length - 1]
+    const left = Math.max(0, Math.min(source.left + dx, last.left + last.width - source.width))
+    drag.to = drag.bounds.filter((bounds, index) => {
+      const center = bounds.left + bounds.width / 2
+      return index < drag.from ? left >= center : index > drag.from && left + source.width >= center
+    }).length
+    const target = drag.bounds[drag.to]
+    const slotLeft = drag.to > drag.from ? target.left + target.width - source.width : target.left
+    setTabDrop({ from: drag.from, to: drag.to, width: source.width, offset: left - source.left, slotLeft })
+  }
+
+  const finishTabDrag = (e: PointerEvent<HTMLButtonElement>): void => {
+    const drag = tabDrag.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    tabDrag.current = null
+    setTabDrop(null)
+    if (e.type === 'pointerup' && drag.moved) {
+      moveTab(drag.bounds[drag.from].id, drag.bounds[drag.to].id, drag.to > drag.from)
+    }
+  }
+
   const activeTab = tabs.find((t) => t.id === activeId) ?? FIRST_QUERY
   const queryRunning = tabs.some((t) => t.kind === 'query' && t.run.status === 'running')
 
@@ -345,16 +430,41 @@ export function App(): JSX.Element {
 
         <main className="main">
           <nav className="tabbar" ref={tabbar} aria-label="Workspace tabs">
-            {tabs.map((t) => (
+            {tabDrop && <div className="tab-drop-slot" style={{ left: tabDrop.slotLeft, width: tabDrop.width }} aria-hidden="true" />}
+            {tabs.map((t, index) => (
               <div
                 key={t.id}
-                className={`tab ${t.id === activeId ? 'active' : ''}`}
+                className={`tab ${t.id === activeId ? 'active' : ''}${tabDrop?.from === index ? ' dragging' : ''}`}
+                style={tabDrop ? { transform: `translateX(${tabDragOffset(tabDrop, index)}px)` } : undefined}
                 onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
               >
                 <button
                   className="tab-label"
                   aria-current={t.id === activeId ? 'page' : undefined}
-                  onClick={() => activateTab(t)}
+                  aria-keyshortcuts="Alt+Shift+ArrowLeft Alt+Shift+ArrowRight"
+                  onClick={(e) => {
+                    if (!suppressTabClick.current || e.detail === 0) activateTab(t)
+                    suppressTabClick.current = false
+                  }}
+                  onPointerDown={(e) => startTabDrag(e, index)}
+                  onPointerMove={previewTabDrag}
+                  onPointerUp={finishTabDrag}
+                  onPointerCancel={finishTabDrag}
+                  onLostPointerCapture={finishTabDrag}
+                  onKeyDown={(e) => {
+                    if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return
+                    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+                    e.preventDefault()
+                    const right = e.key === 'ArrowRight'
+                    const target = tabs[index + (right ? 1 : -1)]
+                    if (!target) return
+                    const label = e.currentTarget
+                    moveTab(t.id, target.id, right)
+                    requestAnimationFrame(() => {
+                      label.focus()
+                      label.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+                    })
+                  }}
                   title={
                     t.kind === 'table'
                       ? `${t.schema}.${t.table}${t.filters?.length ? ` where ${filterSummary(t.filters)}` : ''}`

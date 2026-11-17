@@ -207,6 +207,7 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
 /** The API the preload script exposes to the renderer as `window.api`. */
 export interface SqlApi {
   connect(config: ConnectionConfig): Promise<IpcResult<ConnectionInfo>>
+  testConnection(config: ConnectionConfig): Promise<IpcResult<void>>
   disconnect(): Promise<IpcResult<void>>
   listConnections(): Promise<IpcResult<SavedConnection[]>>
   saveConnection(id: string | null, name: string, config: ConnectionConfig, color: ConnectionColor): Promise<IpcResult<SavedConnection[]>>

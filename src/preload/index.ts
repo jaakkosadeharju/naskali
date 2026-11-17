@@ -4,6 +4,7 @@ import type { SqlApi } from '../shared/types'
 // The only bridge between the sandboxed renderer and Node: a small, typed API.
 const api: SqlApi = {
   connect: (config) => ipcRenderer.invoke('db:connect', config),
+  testConnection: (config) => ipcRenderer.invoke('db:testConnection', config),
   disconnect: () => ipcRenderer.invoke('db:disconnect'),
   listConnections: () => ipcRenderer.invoke('db:listConnections'),
   saveConnection: (id, name, config, color) => ipcRenderer.invoke('db:saveConnection', id, name, config, color),

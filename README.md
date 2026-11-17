@@ -40,6 +40,7 @@ npm run dev          # app with hot reload
 ## Features
 
 - **New query** opens another SQL tab with its own draft and results. Query tabs share the active database session and run one statement at a time.
+- Drag query and table tabs to reorder them, or focus a tab and press **Alt+Shift+Left/Right**.
 - **Ctrl+Enter** runs the selection, or the statement under the cursor (quote/comment-aware `;` splitting)
 - Cancel a running query (MySQL `KILL QUERY`, PostgreSQL `pg_cancel_backend`, SQL Server request cancel, SQLite: the
   editor connection runs in a child process that is killed and reopened – node:sqlite has no interrupt)
