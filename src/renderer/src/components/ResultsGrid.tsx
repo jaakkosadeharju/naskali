@@ -63,7 +63,13 @@ export interface GridEditing {
   rowState: (row: number) => 'new' | 'deleted' | undefined
   /** New-row cell that hasn't been given a value (the column's DEFAULT applies). */
   isDefault: (row: number, col: number) => boolean
-  onEdit: (row: number, col: number, value: CellValue) => void
+  /**
+   * Stages a cell change. `explicit` marks deliberate edits (e.g. from the inspector) so an empty
+   * string on a NULL/DEFAULT cell counts as a change rather than "editor committed without typing".
+   */
+  onEdit: (row: number, col: number, value: CellValue, opts?: { explicit?: boolean }) => void
+  /** Drops a cell's pending change (new-row cell: back to DEFAULT). */
+  revertCell: (row: number, col: number) => void
   /** Delete key with whole rows selected. */
   onDeleteRows: (rows: number[]) => void
 }
@@ -115,12 +121,28 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
   // value – also when it changes (edits, reloads).
   useEffect(() => {
     if (!inspector?.open || inspector.ownerRef.current !== gridId || curRow < 0 || curRow >= rows.length || !fields[curCol]) return
+    const state = editing?.rowState(curRow)
+    const isDefault = state === 'new' && !!editing?.isDefault(curRow, curCol)
+    const canEdit = !!editing && editing.editable(curCol) && state !== 'deleted'
+    const edited = state === 'new' ? !isDefault : !!editing?.isEdited(curRow, curCol)
+    const [row, col] = [curRow, curCol]
     inspector.show({
-      value: rows[curRow][curCol],
-      isDefault: editing?.rowState(curRow) === 'new' && editing.isDefault(curRow, curCol),
-      column: fields[curCol].name,
-      type: columnTypes?.[curCol] ?? fields[curCol].type,
-      source: `${sourceLabel} · ${describeRow ? describeRow(curRow) : `row ${curRow + 1}`}`
+      value: rows[row][col],
+      isDefault,
+      column: fields[col].name,
+      type: columnTypes?.[col] ?? fields[col].type,
+      source: `${sourceLabel} · ${describeRow ? describeRow(row) : `row ${row + 1}`}`,
+      onChange: canEdit ? (v) => editing.onEdit(row, col, v, { explicit: true }) : undefined,
+      nullable: !!editing?.nullable(col),
+      edited,
+      onRevert: canEdit && edited ? () => editing.revertCell(row, col) : undefined,
+      readOnlyReason: canEdit
+        ? undefined
+        : !editing
+          ? 'read-only result'
+          : state === 'deleted'
+            ? 'row is marked for deletion'
+            : 'column is not editable'
     })
   }, [inspector, gridId, curRow, curCol, rows, fields, columnTypes, sourceLabel, describeRow, editing])
 

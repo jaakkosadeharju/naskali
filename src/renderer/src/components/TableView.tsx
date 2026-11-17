@@ -199,12 +199,13 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
         const r = loadedRow(row)
         return !!r && data.fields[col].name in (pending.get(rowKey(r))?.set ?? {})
       },
-      onEdit: (row, col, value) => {
+      onEdit: (row, col, value, opts) => {
         const name = data.fields[col].name
+        const explicit = !!opts?.explicit
         if (row < nNew) {
           const ins = inserts[row]
           // Committing the editor on an untouched DEFAULT cell yields '' – no change.
-          if (!(name in ins.values) && value === '') return
+          if (!explicit && !(name in ins.values) && value === '') return
           touch()
           setInserts((prev) => prev.map((x) => (x.id === ins.id ? { ...x, values: { ...x.values, [name]: value } } : x)))
           return
@@ -212,7 +213,7 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
         const orig = loadedRow(row)
         if (!orig || deleted.has(rowKey(orig))) return
         // Committing the editor on a NULL cell yields '' – treat that as "no change".
-        if (displayRows[row][col] === null && value === '') return
+        if (!explicit && displayRows[row][col] === null && value === '') return
         const k = rowKey(orig)
         touch()
         setPending((prev) => {
@@ -221,6 +222,35 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
           const set = { ...entry.set }
           if (sameValue(orig[col], value)) delete set[name]
           else set[name] = value
+          if (Object.keys(set).length === 0) next.delete(k)
+          else next.set(k, { ...entry, set })
+          return next
+        })
+      },
+      revertCell: (row, col) => {
+        const name = data.fields[col].name
+        touch()
+        if (row < nNew) {
+          const id = inserts[row].id
+          setInserts((prev) =>
+            prev.map((x) => {
+              if (x.id !== id) return x
+              const values = { ...x.values }
+              delete values[name]
+              return { ...x, values }
+            })
+          )
+          return
+        }
+        const orig = loadedRow(row)
+        if (!orig) return
+        const k = rowKey(orig)
+        setPending((prev) => {
+          const entry = prev.get(k)
+          if (!entry || !(name in entry.set)) return prev
+          const next = new Map(prev)
+          const set = { ...entry.set }
+          delete set[name]
           if (Object.keys(set).length === 0) next.delete(k)
           else next.set(k, { ...entry, set })
           return next

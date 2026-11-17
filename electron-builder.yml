@@ -1,4 +1,4 @@
-appId: com.example.naskali
+appId: com.example.naskali # placeholder: use a reverse-DNS id you own before real distribution
 productName: Naskali
 directories:
   output: dist
@@ -13,6 +13,7 @@ linux:
   category: Development
   icon: build/icons # per-size PNGs (16–32 px use the simplified build/icon-small.svg)
   maintainer: Naskali POC
+  syncDesktopName: true # .desktop file name = desktopName, so the running window maps to its menu entry/icon
 mac:
   target: dmg
 win:
