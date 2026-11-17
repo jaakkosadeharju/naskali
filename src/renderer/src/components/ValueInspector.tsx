@@ -97,6 +97,13 @@ export function ValueInspector({ item, onClose, width, onResize }: Props): JSX.E
             {shown.readOnlyReason && <span className="inspector-badge">read-only · {shown.readOnlyReason}</span>}
             <div className="muted inspector-source">{shown.source}</div>
           </div>
+          {shown.link && !edit && (
+            <div className="inspector-actions">
+              <button className="small" onClick={shown.link.open} title="Open the referenced row in a new tab">
+                ↗ Open {shown.link.label}
+              </button>
+            </div>
+          )}
 
           {edit ? (
             <ValueEditor

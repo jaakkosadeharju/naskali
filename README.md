@@ -51,6 +51,9 @@ Connect with `127.0.0.1:3306`, user `dev`, password `dev`, database `shop`.
   or double-click a value in the JSON tree to change just that leaf – also inside JSON strings nested in JSON. Edited
   JSON keeps the original's style (compact vs. pretty-printed). **Set NULL** and **Revert** (new-row cell → `DEFAULT`)
   are there too. Everything becomes a pending change, saved with Accept like grid edits
+- **Foreign-key links**: foreign-key cells in the Data view show a small ↗ button that opens the referenced row in a new
+  tab, pre-filtered (e.g. `customers id = 2`; composite keys filter on all columns). The same reference reuses its tab;
+  the value inspector shows the link as a button too
 - **Table palette** – **Ctrl+P** (⌘P on macOS) from anywhere: fuzzy search over all tables (word-start acronyms like
   `oi` → `order_items`; type `schema.table` to search across databases), recently opened tables first.
   Enter opens the Data view, Ctrl/⌘+Enter the Schema view, Esc returns to where you were

@@ -105,7 +105,7 @@ export interface TableDetails {
     comment: string
   }[]
   indexes: { name: string; unique: boolean; type: string; columns: string[] }[]
-  foreignKeys: { name: string; columns: string[]; refTable: string; refColumns: string[] }[]
+  foreignKeys: { name: string; columns: string[]; refSchema: string; refTable: string; refColumns: string[] }[]
   ddl: string
 }
 

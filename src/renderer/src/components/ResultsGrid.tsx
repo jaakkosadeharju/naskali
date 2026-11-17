@@ -3,6 +3,8 @@ import {
   DataEditor,
   GridCellKind,
   type EditableGridCell,
+  type CellClickedEventArgs,
+  type DrawCellCallback,
   type GridCell,
   type GridColumn,
   type GridSelection,
@@ -87,19 +89,56 @@ interface Props {
   columnTypes?: string[]
   /** Row description for the inspector, e.g. "id = 5"; defaults to "row N". Keep it stable (useCallback). */
   describeRow?: (row: number) => string
+  /** Cells that link somewhere (foreign keys): drawn with a ↗ button that calls `open`. Keep it stable. */
+  cellLinks?: CellLinks
+}
+
+export interface CellLinks {
+  has: (row: number, col: number) => boolean
+  /** e.g. "customers where id = 2" */
+  label: (row: number, col: number) => string
+  open: (row: number, col: number) => void
+}
+
+const LINK_SIZE = 18 // px, square button at the cell's right edge
+const LINK_HIT = LINK_SIZE + 8 // clickable strip width
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
 }
 
 const emptySelection: GridSelection = { rows: CompactSelection.empty(), columns: CompactSelection.empty() }
 
-export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selectionResetKey, sourceLabel, columnTypes, describeRow }: Props): JSX.Element {
+export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selectionResetKey, sourceLabel, columnTypes, describeRow, cellLinks }: Props): JSX.Element {
   const [columns, setColumns] = useState<GridColumn[]>([])
   const [selection, setSelection] = useState<GridSelection>(emptySelection)
   const rowsRef = useRef(rows)
   rowsRef.current = rows
+  const cellLinksRef = useRef(cellLinks)
+  cellLinksRef.current = cellLinks
 
   // A new result (new `fields`) resets sizing and selection; edits only change `rows`.
+  // Sizing also reruns once links appear (table details can arrive after the data).
+  const hasLinks = !!cellLinks
   useEffect(() => {
-    setColumns(fields.map((f, i) => ({ id: String(i), title: f.name, width: initialWidth(f, i, rowsRef.current) })))
+    const sample = Math.min(rowsRef.current.length, 50)
+    const linked = (col: number): boolean => {
+      for (let r = 0; r < sample; r++) if (cellLinksRef.current?.has(r, col)) return true
+      return false
+    }
+    // Columns with link buttons get room for the button.
+    setColumns(
+      fields.map((f, i) => ({ id: String(i), title: f.name, width: initialWidth(f, i, rowsRef.current) + (linked(i) ? LINK_HIT : 0) }))
+    )
+  }, [fields, hasLinks])
+
+  useEffect(() => {
     setSelection(emptySelection)
   }, [fields])
 
@@ -142,9 +181,51 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
           ? 'read-only result'
           : state === 'deleted'
             ? 'row is marked for deletion'
-            : 'column is not editable'
+            : 'column is not editable',
+      link: cellLinks?.has(row, col) ? { label: cellLinks.label(row, col), open: () => cellLinks.open(row, col) } : undefined
     })
-  }, [inspector, gridId, curRow, curCol, rows, fields, columnTypes, sourceLabel, describeRow, editing])
+  }, [inspector, gridId, curRow, curCol, rows, fields, columnTypes, sourceLabel, describeRow, editing, cellLinks])
+
+  /** Paints a small ↗ button over the right edge of linked (foreign key) cells. */
+  const drawCell = useCallback<DrawCellCallback>(
+    (args, drawContent) => {
+      drawContent()
+      if (!cellLinks?.has(args.row, args.col)) return
+      const { ctx, rect } = args
+      const x = rect.x + rect.width - LINK_SIZE - 4
+      const y = rect.y + (rect.height - LINK_SIZE) / 2
+      ctx.save()
+      roundRect(ctx, x, y, LINK_SIZE, LINK_SIZE, 4)
+      ctx.fillStyle = '#2b3a4f'
+      ctx.fill()
+      ctx.strokeStyle = '#3d5a80'
+      ctx.lineWidth = 1
+      ctx.stroke()
+      // Arrow ↗ drawn with lines (font glyphs vary by system).
+      ctx.strokeStyle = '#9cdcfe'
+      ctx.lineWidth = 1.6
+      ctx.lineCap = 'round'
+      ctx.beginPath()
+      ctx.moveTo(x + 5.5, y + LINK_SIZE - 5.5)
+      ctx.lineTo(x + LINK_SIZE - 5.5, y + 5.5)
+      ctx.moveTo(x + 8, y + 5.5)
+      ctx.lineTo(x + LINK_SIZE - 5.5, y + 5.5)
+      ctx.lineTo(x + LINK_SIZE - 5.5, y + 10.5)
+      ctx.stroke()
+      ctx.restore()
+    },
+    [cellLinks]
+  )
+
+  /** A click on a link button opens the link instead of selecting the cell. */
+  const onCellClicked = useCallback(
+    ([col, row]: Item, e: CellClickedEventArgs) => {
+      if (!cellLinks?.has(row, col) || e.localEventX < e.bounds.width - LINK_HIT) return
+      e.preventDefault()
+      cellLinks.open(row, col)
+    },
+    [cellLinks]
+  )
 
   const onGridSelectionChange = useCallback(
     (sel: GridSelection) => {
@@ -170,7 +251,8 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
       const v = rows[row]?.[col] ?? null
-      const align = numeric[col] ? 'right' : 'left'
+      // Linked cells keep their value on the left; the ↗ button sits on the right.
+      const align = numeric[col] && !cellLinks?.has(row, col) ? 'right' : 'left'
       const state = editing?.rowState(row)
       if (state === 'new' && editing?.isDefault(row, col)) {
         return {
@@ -199,7 +281,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
         themeOverride: theme
       }
     },
-    [rows, numeric, editing]
+    [rows, numeric, editing, cellLinks]
   )
 
   const onCellEdited = useCallback(
@@ -242,6 +324,8 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
       gridSelection={selection}
       onGridSelectionChange={onGridSelectionChange}
       onCellActivated={onCellActivated}
+      onCellClicked={cellLinks ? onCellClicked : undefined}
+      drawCell={cellLinks ? drawCell : undefined}
       theme={darkTheme}
       rowMarkers={editing ? 'clickable-number' : 'number'}
       rowSelect="multi"

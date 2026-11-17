@@ -25,6 +25,8 @@ export interface InspectedValue {
   onRevert?: () => void
   /** Why the value can't be edited, when it can't. */
   readOnlyReason?: string
+  /** Foreign-key cell: opens the referenced row. */
+  link?: { label: string; open: () => void }
 }
 
 export interface InspectorApi {
