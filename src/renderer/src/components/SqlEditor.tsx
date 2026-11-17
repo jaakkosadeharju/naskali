@@ -47,11 +47,13 @@ export function sqlToRun(editor: CodeEditor): string | null {
 }
 
 interface Props {
+  primary: boolean
+  initialSql?: string
   onMount: (editor: CodeEditor) => void
   onRun: () => void
 }
 
-export function SqlEditor({ onMount, onRun }: Props): JSX.Element {
+export function SqlEditor({ primary, initialSql, onMount, onRun }: Props): JSX.Element {
   // Monaco commands are registered once, so call through a ref to see the latest handler.
   const onRunRef = useRef(onRun)
   useEffect(() => {
@@ -61,7 +63,7 @@ export function SqlEditor({ onMount, onRun }: Props): JSX.Element {
   return (
     <Editor
       defaultLanguage={editorLanguage()}
-      defaultValue={loadDraft()}
+      defaultValue={primary ? loadDraft() : initialSql ?? ''}
       theme="vs-dark"
       options={{
         minimap: { enabled: false },
@@ -72,6 +74,7 @@ export function SqlEditor({ onMount, onRun }: Props): JSX.Element {
         tabSize: 2
       }}
       onChange={(v) => {
+        if (!primary) return
         try {
           localStorage.setItem(DRAFT_KEY, v ?? '')
         } catch {
@@ -80,7 +83,9 @@ export function SqlEditor({ onMount, onRun }: Props): JSX.Element {
       }}
       onMount={(editor) => {
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current())
-        editor.focus()
+        const range = initialSql && editor.getModel()?.getFullModelRange()
+        if (range) editor.setSelection(range)
+        if (!editor.getDomNode()?.closest('[hidden]')) editor.focus()
         onMount(editor)
       }}
     />

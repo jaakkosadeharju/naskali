@@ -12,6 +12,23 @@
   color-scheme: dark;
 }
 
+[data-connection-color='green'] {
+  --accent: #206346;
+  --accent-hover: #287957;
+}
+[data-connection-color='purple'] {
+  --accent: #654499;
+  --accent-hover: #7a56ad;
+}
+[data-connection-color='amber'] {
+  --accent: #80500f;
+  --accent-hover: #986316;
+}
+[data-connection-color='red'] {
+  --accent: #9a3e47;
+  --accent-hover: #b44954;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -46,6 +63,9 @@ body,
   padding: 0 8px;
   background: var(--bg-3);
   border-bottom: 1px solid var(--border);
+}
+.app[data-connection-color] .toolbar {
+  border-bottom-color: var(--accent);
 }
 .spacer {
   flex: 1;
@@ -139,12 +159,10 @@ input:focus {
 }
 .tab {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 6px;
-  padding: 0 10px 0 12px;
   border-right: 1px solid var(--border);
   color: var(--muted);
-  cursor: pointer;
   white-space: nowrap;
   user-select: none;
 }
@@ -156,15 +174,31 @@ input:focus {
   color: #fff;
   box-shadow: inset 0 2px 0 var(--accent-hover);
 }
+.tab-label {
+  align-self: stretch;
+  padding: 0 10px 0 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+}
+.tab-label:hover:not(:disabled) {
+  background: transparent;
+}
+.tab-label:focus-visible {
+  outline: 1px solid var(--accent-hover);
+  outline-offset: -2px;
+}
 .tab-close {
   border: none;
   background: none;
   padding: 0 3px;
+  margin-right: 6px;
   font-size: 11px;
   color: var(--muted);
   visibility: hidden;
 }
 .tab:hover .tab-close,
+.tab:focus-within .tab-close,
 .tab.active .tab-close {
   visibility: visible;
 }
@@ -418,27 +452,56 @@ select {
 .table-node {
   display: flex;
   align-items: center;
+  gap: 4px;
 }
 .table-label {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .node-actions {
-  display: none;
+  display: flex;
   gap: 2px;
 }
-.table-node:hover .node-actions {
-  display: inline-flex;
-}
 .node-actions button {
-  padding: 0 5px;
-  font-size: 11px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 1lh;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+}
+.node-actions svg {
+  width: 13px;
+  height: 13px;
+}
+.node-actions button:hover,
+.node-actions button:focus-visible {
+  border-color: var(--border);
+}
+.node-actions button:focus-visible {
+  outline: 1px solid var(--accent-hover);
+  outline-offset: 1px;
 }
 .twisty {
   display: inline-block;
   width: 14px;
   color: var(--muted);
+}
+.table-twisty {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 1lh;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+}
+.table-twisty:focus-visible {
+  outline: 1px solid var(--accent-hover);
 }
 .muted {
   color: var(--muted);
@@ -836,7 +899,7 @@ body.resizing {
   white-space: nowrap;
 }
 .palette-list li.selected {
-  background: #04395e;
+  background: color-mix(in srgb, var(--accent) 65%, var(--bg));
 }
 .palette-icon {
   width: 16px;
@@ -902,17 +965,51 @@ kbd {
 
 /* Connect dialog branding (matches the splash screen) */
 .connect-dialog {
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
   padding-top: 0;
-  overflow: hidden;
+  overflow: auto;
+}
+.connect-dialog[data-connection-color='blue'] {
+  --dialog-gradient-highlight: #313e8a;
+  --dialog-gradient-base: #2b3983;
+}
+.connection-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.connection-actions .primary {
+  flex: 1;
+}
+.connection-color-picker {
+  align-items: center;
+}
+.connection-color-swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--accent-hover);
+  border-radius: 50%;
+  background: var(--accent);
 }
 .dialog-brand {
+  --gradient-base: var(--dialog-gradient-base, var(--accent));
   display: flex;
   align-items: center;
   gap: 14px;
   margin: 0 -20px 6px;
   padding: 18px 20px;
-  background: radial-gradient(130% 120% at 0% 0%, #1a4aa8 0%, #123a8c 30%, #0b1e4a 75%, #0a1430 100%);
-  border-bottom: 1px solid rgba(120, 180, 255, 0.18);
+  background: radial-gradient(
+    130% 150% at 0% 0%,
+    var(--dialog-gradient-highlight, var(--accent-hover)) 0%,
+    var(--gradient-base) 35%,
+    color-mix(in srgb, var(--gradient-base) 48%, black) 100%
+  );
+  border-bottom: 1px solid rgba(171, 194, 233, 0.22);
 }
 .dialog-brand img {
   flex: none;
@@ -923,12 +1020,12 @@ kbd {
   font-size: 20px;
   font-weight: 650;
   letter-spacing: 0.3px;
-  color: #e8f1ff;
+  color: #eef4ff;
 }
 .dialog-brand p {
   margin: 2px 0 0;
   font-size: 13px;
-  color: #9db8e6;
+  color: #b9c9e9;
 }
 
 /* Connect dialog: database type picker */

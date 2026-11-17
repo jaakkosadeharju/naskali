@@ -55,32 +55,49 @@ export function SchemaTree({ schemas, currentDb, onUseDatabase, onInsert, onOpen
                       <li key={key}>
                         <div
                           className="node table-node"
-                          onClick={() => toggle(key)}
                           onDoubleClick={() => onOpenTable(s.name, t.name, 'data')}
                           title="Double-click to open data"
                         >
+                          <button
+                            type="button"
+                            className="twisty table-twisty"
+                            aria-label={`${open.has(key) ? 'Collapse' : 'Expand'} columns for ${t.name}`}
+                            aria-expanded={open.has(key)}
+                            onClick={() => toggle(key)}
+                            onDoubleClick={(e) => e.stopPropagation()}
+                          >
+                            {open.has(key) ? '▾' : '▸'}
+                          </button>
                           <span className="table-label">
-                            <span className="twisty">{open.has(key) ? '▾' : '▸'}</span>
                             {t.type === 'VIEW' ? '👁' : '▦'} {t.name}
                           </span>
                           <span className="node-actions" onDoubleClick={(e) => e.stopPropagation()}>
                             <button
+                              type="button"
                               title="Open data"
+                              aria-label={`Open data for ${t.name}`}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 onOpenTable(s.name, t.name, 'data')
                               }}
                             >
-                              Data
+                              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+                                <rect x="2.5" y="3.5" width="11" height="9" rx="1" />
+                                <path d="M2.5 6.5h11m-11 3h11m-7-3v6" />
+                              </svg>
                             </button>
                             <button
+                              type="button"
                               title="Open schema"
+                              aria-label={`Open schema for ${t.name}`}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 onOpenTable(s.name, t.name, 'schema')
                               }}
                             >
-                              Schema
+                              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+                                <path d="M6.5 4.5 3 8l3.5 3.5m3-7L13 8l-3.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
                             </button>
                           </span>
                         </div>
