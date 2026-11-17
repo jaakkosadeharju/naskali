@@ -39,13 +39,14 @@ npm run dev          # app with hot reload
 
 ## Features
 
+- **New query** opens another SQL tab with its own draft and results. Query tabs share the active database session and run one statement at a time.
 - **Ctrl+Enter** runs the selection, or the statement under the cursor (quote/comment-aware `;` splitting)
 - Cancel a running query (MySQL `KILL QUERY`, PostgreSQL `pg_cancel_backend`, SQL Server request cancel, SQLite: the
   editor connection runs in a child process that is killed and reopened – node:sqlite has no interrupt)
 - Virtualized results grid (100k-row cap per result; copy cells with Ctrl+C)
 - Connection dialog with a database-type picker (SQLite: file + Browse…, read-only / create options)
 - Schema tree with filter; double-click a schema to make it current (MySQL, PostgreSQL), a column to insert its name
-- **Table tabs**: hover a table in the tree → **Data** / **Schema** (double-click opens Data). Each tab has a Data | Schema toggle
+- **Table tabs**: use the **Data** and **Schema** icons beside each table (double-click opens Data). Each tab has a Data | Schema toggle
   - *Schema*: columns, indexes, foreign keys, highlighted DDL
   - *Data*: paged (500 rows, PK-ordered) with a filter builder: column + operator + value rows joined by and/or.
     Operators: `= != < <= > >=`, contains / not contains / starts with / ends with (wildcards escaped), raw `LIKE`/`NOT LIKE`,
@@ -77,7 +78,7 @@ npm run dev          # app with hot reload
   `oi` → `order_items`; type `schema.table` to search across databases), recently opened tables first.
   Enter opens the Data view, Ctrl/⌘+Enter the Schema view, Esc returns to where you were
 - Schema-aware autocomplete: tables, columns, `alias.` → columns, `db.` → tables
-- Remembers the last connection; the password is stored only if an OS keyring is available (`safeStorage`)
+- Save named connection profiles in the connection dialog. Select a profile to reconnect, edit it, or remove it. Each profile can set the workspace accent color. Passwords are stored only when OS-backed encryption is available (`safeStorage`).
 
 ## Architecture
 
@@ -89,7 +90,7 @@ src/
     dialect.ts          per-database SQL differences (quoting, placeholders, paging, single-row DML, literals)
     tableQuery.ts       filter rows → parameterized WHERE; change sets → DELETE/UPDATE/INSERT (validated)
     session.ts          table data paging, change preview/apply on top of any driver
-    connectionStore.ts  saved connection (userData/connection.json)
+    connectionStore.ts  saved connections (userData/connection.json)
   preload/    contextBridge → window.api (the only renderer↔Node bridge)
   shared/     types shared across processes (SqlApi, QueryResult, …) + editing rules
     sqlSplit.ts         statement splitter with per-dialect quoting and comment rules
@@ -103,7 +104,7 @@ Database drivers live only in the main process. The renderer is sandboxed (`cont
 
 ## Known POC limitations / next steps
 
-- One connection and one query editor; no query history or export yet
+- One active connection; no query history or export yet
 - No optimistic-concurrency check beyond "row still exists" (a concurrent change to the same row is overwritten);
   no sorting by column header yet;
   `COUNT(*)` for the pager can be slow on huge tables

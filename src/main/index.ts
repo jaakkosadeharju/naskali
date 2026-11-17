@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { createDriver } from './drivers'
 import type { Driver } from './drivers/types'
 import { applyChanges, previewChanges, tableData } from './session'
-import { forgetConnection, loadConnection, saveConnection } from './connectionStore'
+import { deleteConnection, listConnections, saveConnection } from './connectionStore'
 import type { ChangeSet, ConnectionConfig, IpcResult, TableDataRequest } from '../shared/types'
 // `?asset` makes electron-vite copy the file into the build and give us its runtime path.
 import icon from '../../resources/icon.png?asset'
@@ -110,21 +110,21 @@ function handle<A extends unknown[], T>(channel: string, fn: (...args: A) => Pro
   })
 }
 
-handle('db:connect', async (cfg: ConnectionConfig, remember: boolean) => {
+handle('db:connect', async (cfg: ConnectionConfig) => {
   await driver?.disconnect()
   driver = null
   const next = createDriver(cfg)
   const info = await next.connect()
   driver = next
-  if (remember) await saveConnection(cfg)
-  else await forgetConnection()
   return info
 })
 handle('db:disconnect', async () => {
   await driver?.disconnect()
   driver = null
 })
-handle('db:loadSaved', () => loadConnection())
+handle('db:listConnections', listConnections)
+handle('db:saveConnection', saveConnection)
+handle('db:deleteConnection', deleteConnection)
 handle('db:introspect', () => requireDriver().introspect())
 handle('db:query', async (sql: string) => {
   const d = requireDriver()

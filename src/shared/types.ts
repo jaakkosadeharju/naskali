@@ -35,6 +35,16 @@ export interface SqliteConnectionConfig {
 
 export type ConnectionConfig = ServerConnectionConfig | SqliteConnectionConfig
 
+export const CONNECTION_COLORS = ['blue', 'green', 'purple', 'amber', 'red'] as const
+export type ConnectionColor = typeof CONNECTION_COLORS[number]
+
+export interface SavedConnection {
+  id: string
+  name: string
+  color?: ConnectionColor
+  config: ConnectionConfig
+}
+
 export interface ConnectionInfo {
   driver: DriverKind
   /** e.g. "8.4.13" */
@@ -196,9 +206,11 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
 /** The API the preload script exposes to the renderer as `window.api`. */
 export interface SqlApi {
-  connect(config: ConnectionConfig, remember: boolean): Promise<IpcResult<ConnectionInfo>>
+  connect(config: ConnectionConfig): Promise<IpcResult<ConnectionInfo>>
   disconnect(): Promise<IpcResult<void>>
-  loadSavedConnection(): Promise<IpcResult<(ConnectionConfig & { remember: boolean }) | null>>
+  listConnections(): Promise<IpcResult<SavedConnection[]>>
+  saveConnection(id: string | null, name: string, config: ConnectionConfig, color: ConnectionColor): Promise<IpcResult<SavedConnection[]>>
+  deleteConnection(id: string): Promise<IpcResult<SavedConnection[]>>
   introspect(): Promise<IpcResult<SchemaInfo[]>>
   /** Also returns the session's current schema, since the SQL may have run `USE …` / `SET search_path …`. */
   query(sql: string): Promise<IpcResult<{ result: QueryResult; schema: string | null }>>

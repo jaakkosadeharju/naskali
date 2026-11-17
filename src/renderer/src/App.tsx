@@ -9,12 +9,13 @@ import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
 import { TablePalette } from './components/TablePalette'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
-import { DRIVER_LABELS, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo } from '../../shared/types'
+import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo } from '../../shared/types'
 import { setEditorDialect } from './monacoSetup'
 
 interface Connection {
   /** e.g. "dev@127.0.0.1:5432/shop" or "shop.sqlite" */
   label: string
+  color: ConnectionColor
   info: ConnectionInfo
 }
 
@@ -31,13 +32,15 @@ type RunState =
   | { status: 'done'; sql: string; result: QueryResult }
   | { status: 'error'; sql: string; error: string }
 
+type QueryTab = { id: string; kind: 'query'; number: number; run: RunState; initialSql?: string }
+
 type Tab =
-  | { id: 'query'; kind: 'query' }
+  | QueryTab
   | { id: string; kind: 'table'; schema: string; table: string; view: TableViewMode; filters?: RowFilter[] }
 
 const filterSummary = (filters: RowFilter[]): string => filters.map((f) => `${f.column} = ${f.value}`).join(', ')
 
-const QUERY_TAB: Tab = { id: 'query', kind: 'query' }
+const FIRST_QUERY: QueryTab = { id: 'query:1', kind: 'query', number: 1, run: { status: 'idle' } }
 
 const RECENT_TABLES_KEY = 'naskali.recentTables'
 const MAX_RECENT = 20
@@ -65,12 +68,20 @@ export function App(): JSX.Element {
   const [conn, setConn] = useState<Connection | null>(null)
   const [currentDb, setCurrentDb] = useState<string | null>(null)
   const [schemas, setSchemas] = useState<SchemaInfo[]>([])
-  const [run, setRun] = useState<RunState>({ status: 'idle' })
-  const [tabs, setTabs] = useState<Tab[]>([QUERY_TAB])
-  const [activeId, setActiveId] = useState('query')
-  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
+  const [tabs, setTabs] = useState<Tab[]>([FIRST_QUERY])
+  const [activeId, setActiveId] = useState(FIRST_QUERY.id)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const tabbar = useRef<HTMLElement>(null)
+  const editors = useRef(new Map<string, monaco.editor.IStandaloneCodeEditor>())
+  const nextQueryNumber = useRef(2)
+  const lastQueryId = useRef(FIRST_QUERY.id)
+  const runningQuery = useRef<string | null>(null)
   // Tabs with unsaved row edits. Only read when closing, so a ref (no re-render) is enough.
   const dirtyTabs = useRef(new Set<string>())
+
+  useEffect(() => {
+    tabbar.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeId])
 
   // ---- Table palette (Ctrl/Cmd+P) ----
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -147,8 +158,8 @@ export function App(): JSX.Element {
   }, [])
 
   const onConnected = useCallback(
-    (cfg: ConnectionConfig, info: ConnectionInfo) => {
-      setConn({ label: connectionLabel(cfg, info), info })
+    (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor) => {
+      setConn({ label: connectionLabel(cfg, info), color, info })
       setEditorDialect(info.driver)
       updateDb(info.schema)
       void refreshSchema()
@@ -157,35 +168,48 @@ export function App(): JSX.Element {
   )
 
   const disconnect = async (): Promise<void> => {
+    if (runningQuery.current || disconnecting) return
     if (dirtyTabs.current.size > 0 && !window.confirm('Some tables have unsaved changes. Discard them and disconnect?')) return
-    dirtyTabs.current.clear()
+    setDisconnecting(true)
     await window.api.disconnect()
+    dirtyTabs.current.clear()
     setConn(null)
     setSchemas([])
     completionState.schemas = []
-    setRun({ status: 'idle' })
-    setTabs([QUERY_TAB])
-    setActiveId('query')
+    setTabs((ts) => ts.flatMap((t): QueryTab[] => t.kind === 'query' ? [{ ...t, run: { status: 'idle' } }] : []))
+    setActiveId(lastQueryId.current)
     setInspected(null)
     setPaletteOpen(false)
+    setDisconnecting(false)
   }
 
-  const execute = useCallback(async () => {
-    const editor = editorRef.current
-    if (!editor || run.status === 'running') return
+  const execute = async (id: string): Promise<void> => {
+    const editor = editors.current.get(id)
+    if (!conn || disconnecting || !editor || runningQuery.current) return
     const sql = sqlToRun(editor)
     if (!sql) return
-    setRun({ status: 'running', sql, startedAt: Date.now() })
-    const r = await window.api.query(sql)
-    if (!r.ok) {
-      setRun({ status: 'error', sql, error: r.error })
-      return
+
+    const setRun = (run: RunState): void => {
+      setTabs((ts) => ts.map((t) => t.kind === 'query' && t.id === id ? { ...t, run } : t))
     }
-    setRun({ status: 'done', sql, result: r.value.result })
-    updateDb(r.value.schema)
-    // DDL changes the schema; keep the tree and autocomplete in sync.
-    if (/^\s*(create|alter|drop|rename|truncate)\b/i.test(sql)) void refreshSchema()
-  }, [run.status, refreshSchema, updateDb])
+    runningQuery.current = id
+    setRun({ status: 'running', sql, startedAt: Date.now() })
+    try {
+      const r = await window.api.query(sql)
+      if (!r.ok) {
+        setRun({ status: 'error', sql, error: r.error })
+        return
+      }
+      setRun({ status: 'done', sql, result: r.value.result })
+      updateDb(r.value.schema)
+      // DDL changes the schema; keep the tree and autocomplete in sync.
+      if (/^\s*(create|alter|drop|rename|truncate)\b/i.test(sql)) void refreshSchema()
+    } catch (error) {
+      setRun({ status: 'error', sql, error: error instanceof Error ? error.message : String(error) })
+    } finally {
+      runningQuery.current = null
+    }
+  }
 
   const useSchema = async (name: string): Promise<void> => {
     if (!conn?.info.capabilities.switchSchema) return
@@ -194,29 +218,11 @@ export function App(): JSX.Element {
   }
 
   const insertText = (text: string): void => {
-    const editor = editorRef.current
+    const editor = editors.current.get(lastQueryId.current)
     const sel = editor?.getSelection()
     if (!editor || !sel) return
-    setActiveId('query')
+    setActiveId(lastQueryId.current)
     editor.executeEdits('schema-tree', [{ range: sel, text, forceMoveMarkers: true }])
-    editor.focus()
-  }
-
-  /** Appends SQL to the end of the query editor, selects it and switches to the Query tab. */
-  const openInEditor = (sql: string): void => {
-    const editor = editorRef.current
-    const model = editor?.getModel()
-    if (!editor || !model) return
-    setActiveId('query')
-    const end = model.getFullModelRange().getEndPosition()
-    const prefix = model.getValueLength() === 0 ? '' : model.getLineContent(end.lineNumber).trim() ? '\n\n' : '\n'
-    const text = sql.trimEnd().endsWith(';') ? sql.trimEnd() : `${sql.trimEnd()};`
-    editor.executeEdits('open-in-editor', [{ range: monaco.Range.fromPositions(end), text: prefix + text, forceMoveMarkers: true }])
-    const startPos = model.getPositionAt(model.getOffsetAt(end) + prefix.length)
-    const endPos = model.getFullModelRange().getEndPosition()
-    editor.setSelection(monaco.Range.fromPositions(startPos, endPos))
-    editor.revealRangeInCenter(editor.getSelection()!)
-    // The editor was hidden; focus once it's visible again.
     requestAnimationFrame(() => editor.focus())
   }
 
@@ -249,31 +255,62 @@ export function App(): JSX.Element {
     [openTable]
   )
 
+  const activateTab = (tab: Tab): void => {
+    setActiveId(tab.id)
+    if (tab.kind === 'query') {
+      lastQueryId.current = tab.id
+      requestAnimationFrame(() => editors.current.get(tab.id)?.focus())
+    }
+  }
+
+  const newQueryTab = (initialSql?: string): void => {
+    const number = nextQueryNumber.current++
+    const tab: QueryTab = { id: `query:${number}`, kind: 'query', number, run: { status: 'idle' }, initialSql }
+    setTabs((ts) => [...ts, tab])
+    activateTab(tab)
+  }
+
+  const openInEditor = (sql: string): void => {
+    const text = sql.trimEnd()
+    if (text) newQueryTab(text.endsWith(';') ? text : `${text};`)
+  }
+
   const closeTab = (id: string): void => {
-    if (id === 'query') return
-    const tab = tabs.find((t) => t.id === id)
-    if (dirtyTabs.current.has(id) && tab?.kind === 'table' && !window.confirm(`Discard unsaved changes to ${tab.table}?`)) return
-    dirtyTabs.current.delete(id)
+    if (id === FIRST_QUERY.id || id === runningQuery.current) return
     const idx = tabs.findIndex((t) => t.id === id)
+    const tab = tabs[idx]
+    if (!tab) return
+    if (dirtyTabs.current.has(id) && tab.kind === 'table' && !window.confirm(`Discard unsaved changes to ${tab.table}?`)) return
+    dirtyTabs.current.delete(id)
+    editors.current.delete(id)
     const next = tabs.filter((t) => t.id !== id)
+    if (lastQueryId.current === id) {
+      lastQueryId.current = next.slice(0, idx).reverse().find((t) => t.kind === 'query')?.id ?? FIRST_QUERY.id
+    }
     setTabs(next)
-    if (id === activeId) setActiveId(next[Math.max(0, idx - 1)].id)
+    if (id === activeId) activateTab(next[Math.max(0, idx - 1)])
   }
 
   const setTableView = (id: string, view: TableViewMode): void =>
     setTabs((ts) => ts.map((t) => (t.id === id && t.kind === 'table' ? { ...t, view } : t)))
 
-  const activeTab = tabs.find((t) => t.id === activeId) ?? QUERY_TAB
-  const queryActive = activeTab.kind === 'query'
+  const activeTab = tabs.find((t) => t.id === activeId) ?? FIRST_QUERY
+  const queryRunning = tabs.some((t) => t.kind === 'query' && t.run.status === 'running')
 
   return (
     <InspectorContext.Provider value={inspectorApi}>
-      <div className={`app ${inspectorOpen ? 'with-inspector' : ''}`}>
+      <div className={`app ${inspectorOpen ? 'with-inspector' : ''}`} data-connection-color={conn?.color}>
         <header className="toolbar">
-          <button className="primary" onClick={execute} disabled={!conn || !queryActive || run.status === 'running'} title="Ctrl+Enter">
+          <button onClick={() => newQueryTab()} disabled={!conn || disconnecting}>+ New query</button>
+          <button
+            className="primary"
+            onClick={() => void execute(activeTab.id)}
+            disabled={!conn || disconnecting || activeTab.kind !== 'query' || queryRunning}
+            title="Ctrl+Enter"
+          >
             ▶ Run
           </button>
-          <button onClick={() => void window.api.cancel()} disabled={run.status !== 'running'}>
+          <button onClick={() => void window.api.cancel()} disabled={!queryRunning}>
             ■ Cancel
           </button>
           <div className="spacer" />
@@ -289,7 +326,7 @@ export function App(): JSX.Element {
               <span className="conn-label">
                 {conn.label} · {currentDb ?? 'no schema'} · {DRIVER_LABELS[conn.info.driver]} {conn.info.serverVersion}
               </span>
-              <button onClick={disconnect}>Disconnect</button>
+              <button onClick={disconnect} disabled={queryRunning || disconnecting}>Disconnect</button>
             </>
           )}
         </header>
@@ -307,51 +344,62 @@ export function App(): JSX.Element {
         </aside>
 
         <main className="main">
-          <nav className="tabbar">
+          <nav className="tabbar" ref={tabbar} aria-label="Workspace tabs">
             {tabs.map((t) => (
               <div
                 key={t.id}
                 className={`tab ${t.id === activeId ? 'active' : ''}`}
-                onClick={() => setActiveId(t.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
-                title={
-                  t.kind === 'table'
-                    ? `${t.schema}.${t.table}${t.filters?.length ? ` where ${filterSummary(t.filters)}` : ''}`
-                    : 'SQL editor'
-                }
               >
-                {t.kind === 'query' ? (
-                  <span>✎ Query</span>
-                ) : (
-                  <>
-                    <span>
+                <button
+                  className="tab-label"
+                  aria-current={t.id === activeId ? 'page' : undefined}
+                  onClick={() => activateTab(t)}
+                  title={
+                    t.kind === 'table'
+                      ? `${t.schema}.${t.table}${t.filters?.length ? ` where ${filterSummary(t.filters)}` : ''}`
+                      : `SQL editor ${t.number}`
+                  }
+                >
+                  {t.kind === 'query' ? (
+                    `✎ Query ${t.number}${t.run.status === 'running' ? ' …' : ''}`
+                  ) : (
+                    <>
                       {t.view === 'schema' ? 'ⓘ' : '▦'} {t.table}
                       {t.filters?.length ? <span className="tab-filter"> {filterSummary(t.filters)}</span> : null}
-                    </span>
-                    <button
-                      className="tab-close"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        closeTab(t.id)
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </>
+                    </>
+                  )}
+                </button>
+                {t.id !== FIRST_QUERY.id && (
+                  <button
+                    className="tab-close"
+                    aria-label={t.kind === 'query' ? `Close Query ${t.number}` : `Close ${t.table}`}
+                    disabled={t.kind === 'query' && t.run.status === 'running'}
+                    onClick={() => closeTab(t.id)}
+                  >
+                    ✕
+                  </button>
                 )}
               </div>
             ))}
           </nav>
 
-          {/* Tabs stay mounted while hidden so the editor buffer, filters and pages survive switching. */}
-          <div className="tab-panel query-panel" hidden={!queryActive}>
-            <section className="editor">
-              <SqlEditor onMount={(e) => (editorRef.current = e)} onRun={execute} />
-            </section>
-            <section className="results">
-              <ResultsPanel run={run} />
-            </section>
-          </div>
+          {/* Keep buffers, results, filters and pages mounted while switching tabs. */}
+          {tabs.map((t) => t.kind === 'query' && (
+            <div key={t.id} className="tab-panel query-panel" hidden={t.id !== activeId}>
+              <section className="editor">
+                <SqlEditor
+                  primary={t.id === FIRST_QUERY.id}
+                  initialSql={t.initialSql}
+                  onMount={(editor) => editors.current.set(t.id, editor)}
+                  onRun={() => void execute(t.id)}
+                />
+              </section>
+              <section className="results">
+                <ResultsPanel run={t.run} label={`Query ${t.number}`} />
+              </section>
+            </div>
+          ))}
           {tabs.map(
             (t) =>
               t.kind === 'table' && (
@@ -380,7 +428,7 @@ export function App(): JSX.Element {
         )}
 
         <footer className="statusbar">
-          {queryActive ? <StatusText run={run} /> : <span>{activeTab.kind === 'table' && `${activeTab.schema}.${activeTab.table}`}</span>}
+          {activeTab.kind === 'query' ? <StatusText run={activeTab.run} /> : <span>{activeTab.schema}.{activeTab.table}</span>}
         </footer>
 
         {!conn && <ConnectDialog onConnected={onConnected} />}
@@ -401,7 +449,7 @@ export function App(): JSX.Element {
   )
 }
 
-function ResultsPanel({ run }: { run: RunState }): JSX.Element {
+function ResultsPanel({ run, label }: { run: RunState; label: string }): JSX.Element {
   switch (run.status) {
     case 'idle':
       return <div className="placeholder">Run a query with Ctrl+Enter</div>
@@ -410,7 +458,7 @@ function ResultsPanel({ run }: { run: RunState }): JSX.Element {
     case 'error':
       return <pre className="error-panel">{run.error}</pre>
     case 'done':
-      if (run.result.kind === 'rows') return <ResultsGrid fields={run.result.fields} rows={run.result.rows} sourceLabel="Query result" />
+      if (run.result.kind === 'rows') return <ResultsGrid fields={run.result.fields} rows={run.result.rows} sourceLabel={label} />
       return (
         <div className="placeholder">
           {run.result.affectedRows === null ? 'Statement completed' : `${run.result.affectedRows} row(s) affected`}
