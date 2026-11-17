@@ -1,10 +1,11 @@
-import { FILTER_OPS, UNARY_OPS, type FilterOp, type RowFilter } from '../../../shared/types'
+import { COMPARISON_OPS, FILTER_OPS, UNARY_OPS, type FilterOp, type RowFilter } from '../../../shared/types'
 
 export interface DraftFilter extends RowFilter {
   id: number
 }
 
 interface Props {
+  sqlite: boolean
   columns: string[]
   filters: DraftFilter[]
   match: 'all' | 'any'
@@ -23,7 +24,7 @@ function placeholder(op: FilterOp): string {
   return 'value'
 }
 
-export function FilterBar({ columns, filters, match, dirty, onChange, onMatchChange, onApply }: Props): JSX.Element {
+export function FilterBar({ sqlite, columns, filters, match, dirty, onChange, onMatchChange, onApply }: Props): JSX.Element {
   const update = (id: number, patch: Partial<RowFilter>): void =>
     onChange(filters.map((f) => (f.id === id ? { ...f, ...patch } : f)))
 
@@ -66,6 +67,17 @@ export function FilterBar({ columns, filters, match, dirty, onChange, onMatchCha
               onKeyDown={(e) => e.key === 'Enter' && onApply()}
               autoFocus={f.value === '' && i === filters.length - 1}
             />
+          )}
+          {sqlite && COMPARISON_OPS.has(f.op) && (
+            <select
+              aria-label="Filter value type"
+              value={f.operandType ?? ''}
+              onChange={(e) => update(f.id, { operandType: (e.target.value || undefined) as RowFilter['operandType'] })}
+            >
+              <option value="">Auto</option>
+              <option value="number">Number</option>
+              <option value="text">Text</option>
+            </select>
           )}
           <button className="icon" title="Remove filter" onClick={() => onChange(filters.filter((x) => x.id !== f.id))}>
             ✕

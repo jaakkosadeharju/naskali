@@ -11,6 +11,7 @@ const PAGE_SIZE = 500
 export type TableViewMode = 'data' | 'schema'
 
 interface Props {
+  sqlite: boolean
   schema: string
   table: string
   view: TableViewMode
@@ -53,13 +54,13 @@ interface Applied {
   match: 'all' | 'any'
 }
 
-const strip = (fs: DraftFilter[]): RowFilter[] => fs.map(({ column, op, value }) => ({ column, op, value }))
+const strip = (fs: DraftFilter[]): RowFilter[] => fs.map(({ id, ...filter }) => filter)
 
-export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirtyChange, initialFilters, onOpenReference }: Props): JSX.Element {
+export function TableView({ sqlite, schema, table, view, onViewChange, onOpenSql, onDirtyChange, initialFilters, onOpenReference }: Props): JSX.Element {
   const [details, setDetails] = useState<TableDetails | null>(null)
   const [detailsError, setDetailsError] = useState<string | null>(null)
 
-  const [draft, setDraft] = useState<DraftFilter[]>(() => (initialFilters ?? []).map((f) => ({ ...newFilter(f.column), op: f.op, value: f.value })))
+  const [draft, setDraft] = useState<DraftFilter[]>(() => (initialFilters ?? []).map((f) => ({ ...newFilter(f.column), ...f })))
   const [match, setMatch] = useState<'all' | 'any'>('all')
   const [applied, setApplied] = useState<Applied>(() => ({ filters: initialFilters ?? [], match: 'all' }))
   const [offset, setOffset] = useState(0)
@@ -135,7 +136,10 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
     onDirtyChange(changeCount > 0)
   }, [changeCount, onDirtyChange])
 
-  const editability = details ? tableEditability(details.type, details.columns) : null
+  const editDisabledReason = details?.editDisabledReason ?? data?.editDisabledReason
+  const editability = editDisabledReason
+    ? { editable: false as const, reason: editDisabledReason }
+    : details ? tableEditability(details.type, details.columns) : null
   const fields = data?.fields
 
   // Per-column facts for the current result, looked up by name in the table details.
@@ -168,7 +172,7 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
     if (!data || !colInfo) return data?.rows ?? []
     const newRows = inserts.map((ins) => data.fields.map((f) => (f.name in ins.values ? ins.values[f.name] : null)))
     const loaded =
-      pending.size === 0
+      pending.size === 0 || data.editDisabledReason
         ? data.rows
         : data.rows.map((r) => {
             const p = pending.get(rowKey(r))
@@ -332,7 +336,7 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
       const r = data?.rows[row - inserts.length]
       if (!r || !colInfo || colInfo.pk.some((p) => p.idx < 0)) return `row ${row + 1}`
       const pk = colInfo.pk.map((p) => `${p.name} = ${r[p.idx]}`).join(', ')
-      return deleted.has(rowKey(r)) ? `${pk} (marked for deletion)` : pk
+      return !data?.editDisabledReason && deleted.has(rowKey(r)) ? `${pk} (marked for deletion)` : pk
     },
     [inserts.length, data, colInfo, deleted, rowKey]
   )
@@ -423,6 +427,7 @@ export function TableView({ schema, table, view, onViewChange, onOpenSql, onDirt
       ) : (
         <>
           <FilterBar
+            sqlite={sqlite}
             columns={details?.columns.map((c) => c.name) ?? []}
             filters={draft}
             match={match}

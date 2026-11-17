@@ -357,6 +357,7 @@ export function App(): JSX.Element {
               t.kind === 'table' && (
                 <div key={t.id} className="tab-panel" hidden={t.id !== activeId}>
                   <TableView
+                    sqlite={conn?.info.driver === 'sqlite'}
                     schema={t.schema}
                     table={t.table}
                     view={t.view}
@@ -412,8 +413,8 @@ function ResultsPanel({ run }: { run: RunState }): JSX.Element {
       if (run.result.kind === 'rows') return <ResultsGrid fields={run.result.fields} rows={run.result.rows} sourceLabel="Query result" />
       return (
         <div className="placeholder">
-          {run.result.affectedRows} row(s) affected
-          {run.result.insertId ? ` · insert id ${run.result.insertId}` : ''}
+          {run.result.affectedRows === null ? 'Statement completed' : `${run.result.affectedRows} row(s) affected`}
+          {run.result.insertId !== null ? ` · insert id ${run.result.insertId}` : ''}
           {run.result.info ? ` · ${run.result.info}` : ''}
         </div>
       )

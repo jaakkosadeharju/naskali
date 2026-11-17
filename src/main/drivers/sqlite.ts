@@ -102,13 +102,30 @@ function toFields(fields: WorkerField[], rows: unknown[][]): ResultField[] {
   })
 }
 
-const SYSTEM_SCHEMAS = new Set(['temp'])
+function sqliteInteger(v: bigint): number | string {
+  const number = Number(v)
+  return Number.isSafeInteger(number) ? number : v.toString()
+}
+
+function sqliteValue(v: unknown) {
+  return typeof v === 'bigint' ? sqliteInteger(v) : normalise(v)
+}
+
+function isUnsafeKeyValue(v: unknown): boolean {
+  if (typeof v === 'bigint') return !Number.isSafeInteger(Number(v))
+  if (typeof v === 'number') return !Number.isFinite(v)
+  return v === null || v instanceof Uint8Array
+}
+
+function requireMainSchema(schema: string): void {
+  if (schema !== 'main') throw new Error('SQLite table tools are available for the main database only')
+}
 
 /**
  * SQLite through node:sqlite: the editor connection runs in a child process
  * (killed and reopened to cancel a statement), the metadata connection – data
  * view, introspection, change transactions – in a worker thread.
- * Schemas are `main` plus attached databases.
+ * Table tools browse `main`. Attachments belong to the editor session.
  */
 export class SqliteDriver implements Driver {
   readonly dialect = DIALECTS.sqlite
@@ -173,11 +190,14 @@ export class SqliteDriver implements Driver {
       const editor = await this.editor
       const r = await editor.call<QueryReply>({ op: 'query', sql, max: MAX_ROWS })
       const elapsedMs = Math.round(performance.now() - started)
-      if (r.kind === 'ok') return { kind: 'ok', affectedRows: r.changes, insertId: r.lastInsertRowid, info: '', elapsedMs }
+      if (r.kind === 'ok') {
+        const insertId = r.lastInsertRowid === null ? null : sqliteInteger(r.lastInsertRowid)
+        return { kind: 'ok', affectedRows: r.changes, insertId, info: '', elapsedMs }
+      }
       return {
         kind: 'rows',
         fields: toFields(r.fields, r.rows),
-        rows: r.rows.map((row) => row.map(normalise)),
+        rows: r.rows.map((row) => row.map(sqliteValue)),
         rowCount: r.truncated ? null : r.rows.length,
         truncated: r.truncated,
         elapsedMs
@@ -206,10 +226,16 @@ export class SqliteDriver implements Driver {
 
   async selectRows(sql: string, params: Param[]): Promise<Rows> {
     const r = await this.requireMeta().call<{ fields: WorkerField[]; rows: unknown[][] }>({ op: 'select', sql, params })
-    return { fields: toFields(r.fields, r.rows), rows: r.rows.map((row) => row.map(normalise)) }
+    const unsafeKeyColumns = new Set<string>()
+    const rows = r.rows.map((row) => row.map((value, i) => {
+      if (isUnsafeKeyValue(value)) unsafeKeyColumns.add(r.fields[i].name)
+      return sqliteValue(value)
+    }))
+    return { fields: toFields(r.fields, r.rows), rows, unsafeKeyColumns }
   }
 
   async inTransaction<T>(fn: (exec: Exec) => Promise<T>): Promise<T> {
+    if (this.cfg.readOnly) throw new Error('This SQLite connection is read-only')
     const meta = this.requireMeta()
     await meta.call({ op: 'script', sql: 'BEGIN IMMEDIATE' })
     try {
@@ -235,6 +261,7 @@ export class SqliteDriver implements Driver {
   }
 
   async columnMeta(schema: string, table: string): Promise<ColumnMeta[]> {
+    requireMainSchema(schema)
     const cols = await this.xinfo(schema, table)
     if (cols.length === 0) throw new Error(`Table not found: ${schema}.${table}`)
     return cols
@@ -249,9 +276,7 @@ export class SqliteDriver implements Driver {
   }
 
   async introspect(): Promise<SchemaInfo[]> {
-    const schemas = (await this.objects<{ name: string }>('SELECT name FROM pragma_database_list ORDER BY seq', []))
-      .map((s) => s.name)
-      .filter((s) => !SYSTEM_SCHEMAS.has(s))
+    const schemas = ['main']
     const tables: { schema: string; table: string; type: string }[] = []
     const columns: { schema: string; table: string; name: string; type: string; nullable: boolean; key: string }[] = []
     for (const schema of schemas) {
@@ -276,6 +301,7 @@ export class SqliteDriver implements Driver {
   }
 
   async tableDetails(schema: string, table: string): Promise<TableDetails> {
+    requireMainSchema(schema)
     const master = `${this.dialect.quote(schema)}.sqlite_master`
     const [obj] = await this.objects<{ type: string; sql: string | null }>(`SELECT type, sql FROM ${master} WHERE name = ? AND type IN ('table', 'view')`, [table])
     if (!obj) throw new Error(`Table not found: ${schema}.${table}`)
@@ -324,6 +350,7 @@ export class SqliteDriver implements Driver {
       engine: null,
       rowsEstimate: null,
       comment: '',
+      editDisabledReason: this.cfg.readOnly ? 'This SQLite connection is read-only' : undefined,
       columns: cols.map((c) => ({
         name: c.name,
         type: c.type,

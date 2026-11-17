@@ -5,7 +5,8 @@
 // Protocol: the parent posts { id, op, ... } and gets back
 // { id, ok: true, value } or { id, ok: false, error }.
 import { parentPort } from 'node:worker_threads'
-import { DatabaseSync, type StatementSync } from 'node:sqlite'
+import { constants, DatabaseSync, type StatementSync } from 'node:sqlite'
+import { SPLIT_RULES, splitStatements } from '../../shared/sqlSplit'
 
 type Value = null | number | bigint | string | Uint8Array
 
@@ -25,7 +26,7 @@ export type WorkerRequest =
 
 export type QueryReply =
   | { kind: 'rows'; fields: WorkerField[]; rows: unknown[][]; truncated: boolean }
-  | { kind: 'ok'; changes: number; lastInsertRowid: number }
+  | { kind: 'ok'; changes: number | null; lastInsertRowid: bigint | null }
 
 let db: DatabaseSync | null = null
 
@@ -33,6 +34,40 @@ const bindable = (v: unknown): Value => (typeof v === 'boolean' ? (v ? 1 : 0) : 
 
 function fieldsOf(stmt: StatementSync): WorkerField[] {
   return stmt.columns().map((c) => ({ name: c.name, type: c.type ?? null }))
+}
+
+const SQLITE_TRIVIA = /^(?:[\t\n\f\r ;\uFEFF]+|--[^\n]*|\/\*(?:[^*]|\*(?!\/))*(?:\*\/|$))*/
+
+function prepareEditorQuery(db: DatabaseSync, sql: string) {
+  if (sql.includes('\0')) throw new Error('SQL cannot contain a NUL character')
+
+  // Some pragmas take effect during prepare, so check them before calling SQLite.
+  const firstToken = sql.replace(SQLITE_TRIVIA, '')
+  if (/^(?:EXPLAIN\s+(?:QUERY\s+PLAN\s+)?)?PRAGMA\b/i.test(firstToken)) {
+    const [pragma] = splitStatements(firstToken, SPLIT_RULES.sqlite)
+    if (pragma && firstToken.slice(pragma.end).replace(SQLITE_TRIVIA, '') !== '') {
+      throw new Error('Run one SQLite statement at a time')
+    }
+  }
+
+  let firstAction: number | undefined
+  db.setAuthorizer((action, table) => {
+    // DDL writes SQLite's catalog. Only count a top-level write to a user table.
+    firstAction ??= table?.startsWith('sqlite_') ? constants.SQLITE_OK : action
+    return constants.SQLITE_OK
+  })
+  try {
+    const stmt = db.prepare(sql)
+    // SQLite itself identifies the first statement, including trigger bodies.
+    const tail = sql.slice(stmt.sourceSQL.length)
+    if (tail.replace(SQLITE_TRIVIA, '') !== '') {
+      throw new Error('Run one SQLite statement at a time')
+    }
+    stmt.setReadBigInts(true)
+    return { stmt, action: firstAction }
+  } finally {
+    db.setAuthorizer(null)
+  }
 }
 
 function handle(req: WorkerRequest): unknown {
@@ -52,11 +87,20 @@ function handle(req: WorkerRequest): unknown {
 
   switch (req.op) {
     case 'query': {
-      const stmt = db.prepare(req.sql)
+      const { stmt, action } = prepareEditorQuery(db, req.sql)
       const fields = fieldsOf(stmt)
       if (fields.length === 0) {
+        const insert = action === constants.SQLITE_INSERT
+        const lastId = insert ? db.prepare('SELECT last_insert_rowid() AS id') : null
+        lastId?.setReadBigInts(true)
+        const previousId = lastId?.get()?.id
         const r = stmt.run()
-        return { kind: 'ok', changes: Number(r.changes), lastInsertRowid: Number(r.lastInsertRowid) } satisfies QueryReply
+        const changes = insert || action === constants.SQLITE_UPDATE || action === constants.SQLITE_DELETE
+          ? Number(r.changes)
+          : null
+        // An ignored insert, an UPSERT update, or a WITHOUT ROWID table can leave an old ID behind.
+        const lastInsertRowid = insert && changes && r.lastInsertRowid !== previousId ? BigInt(r.lastInsertRowid) : null
+        return { kind: 'ok', changes, lastInsertRowid } satisfies QueryReply
       }
       stmt.setReturnArrays(true)
       const rows: unknown[][] = []
@@ -72,11 +116,15 @@ function handle(req: WorkerRequest): unknown {
     }
     case 'select': {
       const stmt = db.prepare(req.sql)
+      stmt.setReadBigInts(true)
       stmt.setReturnArrays(true)
       return { fields: fieldsOf(stmt), rows: stmt.all(...req.params.map(bindable)) }
     }
-    case 'exec':
-      return Number(db.prepare(req.sql).run(...req.params.map(bindable)).changes)
+    case 'exec': {
+      const stmt = db.prepare(req.sql)
+      stmt.setReadBigInts(true)
+      return Number(stmt.run(...req.params.map(bindable)).changes)
+    }
     case 'script':
       db.exec(req.sql)
       return null

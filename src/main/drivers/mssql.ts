@@ -111,6 +111,7 @@ export class MssqlDriver implements Driver {
 
     return new Promise<QueryResult>((resolve, reject) => {
       let columns: Column[] | null = null
+      let readingFirstResultSet = false
       const rows: CellValue[][] = []
       let truncated = false
       let affected = 0
@@ -118,10 +119,11 @@ export class MssqlDriver implements Driver {
 
       req.on('recordset', (cols: Column[]) => {
         // Batches can return several result sets; show the first.
-        if (!columns) columns = cols
+        readingFirstResultSet = columns === null
+        if (readingFirstResultSet) columns = cols
       })
       req.on('row', (row: unknown[]) => {
-        if (stopped || columns === null || rows.length > 0 && columns.length !== row.length) return
+        if (stopped || !readingFirstResultSet) return
         if (rows.length >= MAX_ROWS) {
           truncated = stopped = true
           req.cancel()
@@ -138,7 +140,7 @@ export class MssqlDriver implements Driver {
         if (columns) {
           resolve({ kind: 'rows', fields: toFields(columns), rows, rowCount: truncated ? null : rows.length, truncated, elapsedMs })
         } else {
-          resolve({ kind: 'ok', affectedRows: affected, insertId: 0, info: '', elapsedMs })
+          resolve({ kind: 'ok', affectedRows: affected, insertId: null, info: '', elapsedMs })
         }
       }
       req.on('error', (err: Error & { code?: string }) => {

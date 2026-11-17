@@ -11,7 +11,7 @@ export async function tableData(driver: Driver, req: TableDataRequest): Promise<
   const d = driver.dialect
   const started = performance.now()
   const cols = await driver.columnMeta(req.schema, req.table)
-  const where = buildWhere(d, req.filters, req.match, new Set(cols.map((c) => c.name)))
+  const where = buildWhere(d, req.filters, req.match, cols)
   const from = qualify(d, req.schema, req.table)
   // Order by primary key so paging is stable.
   const pk = cols.filter((c) => c.key === 'PRI').map((c) => d.quote(c.name))
@@ -24,8 +24,10 @@ export async function tableData(driver: Driver, req: TableDataRequest): Promise<
   const c = render(count, d)
   const total = Number((await driver.selectRows(c.text, c.params)).rows[0]?.[0] ?? 0)
   const s = render(select, d)
-  const { fields, rows } = await driver.selectRows(s.text, s.params)
-  return { fields, rows, total, offset, sql: display(select, d), elapsedMs: Math.round(performance.now() - started) }
+  const { fields, rows, unsafeKeyColumns } = await driver.selectRows(s.text, s.params)
+  const unsafeKeys = unsafeKeyColumns && cols.some((c) => c.key === 'PRI' && unsafeKeyColumns.has(c.name))
+  const editDisabledReason = unsafeKeys ? 'This page contains primary keys that cannot be edited safely' : undefined
+  return { fields, rows, total, offset, sql: display(select, d), elapsedMs: Math.round(performance.now() - started), editDisabledReason }
 }
 
 export async function previewChanges(driver: Driver, cs: ChangeSet): Promise<string[]> {
