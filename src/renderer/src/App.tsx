@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { monaco } from './monacoSetup'
 import { completionState } from './completion'
 import { ConnectDialog } from './components/ConnectDialog'
@@ -6,6 +6,8 @@ import { SchemaTree } from './components/SchemaTree'
 import { SqlEditor, sqlToRun } from './components/SqlEditor'
 import { ResultsGrid } from './components/ResultsGrid'
 import { TableView, type TableViewMode } from './components/TableView'
+import { ValueInspector } from './components/ValueInspector'
+import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
 import type { ConnectionConfig, QueryResult, SchemaInfo } from '../../shared/types'
 
 interface Connection {
@@ -25,6 +27,17 @@ type Tab =
 
 const QUERY_TAB: Tab = { id: 'query', kind: 'query' }
 
+const INSPECTOR_WIDTH_KEY = 'naskali.inspectorWidth'
+const clampWidth = (w: number): number => Math.round(Math.min(Math.max(w, 260), window.innerWidth * 0.7))
+function loadInspectorWidth(): number {
+  try {
+    const w = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY))
+    return w > 0 ? clampWidth(w) : 420
+  } catch {
+    return 420
+  }
+}
+
 export function App(): JSX.Element {
   const [conn, setConn] = useState<Connection | null>(null)
   const [currentDb, setCurrentDb] = useState<string | null>(null)
@@ -35,6 +48,39 @@ export function App(): JSX.Element {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
   // Tabs with unsaved row edits. Only read when closing, so a ref (no re-render) is enough.
   const dirtyTabs = useRef(new Set<string>())
+
+  // ---- Value inspector (right panel) ----
+  const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [inspected, setInspected] = useState<InspectedValue | null>(null)
+  const [inspectorWidth, setInspectorWidth] = useState(loadInspectorWidth)
+  const inspectorOwner = useRef<string | null>(null)
+  // Memoized: grids push values from effects keyed on this object, so a new
+  // object per render would make them push (and re-render the app) forever.
+  const inspectorApi = useMemo<InspectorApi>(
+    () => ({ open: inspectorOpen, setOpen: setInspectorOpen, show: setInspected, ownerRef: inspectorOwner }),
+    [inspectorOpen]
+  )
+  const resizeInspector = useCallback((w: number) => {
+    const width = clampWidth(w)
+    setInspectorWidth(width)
+    try {
+      localStorage.setItem(INSPECTOR_WIDTH_KEY, String(width))
+    } catch {
+      /* not persisted; fine */
+    }
+  }, [])
+  // Ctrl+I toggles the panel anywhere except inside the SQL editor (Monaco uses it).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'i') {
+        if ((e.target as HTMLElement | null)?.closest?.('.monaco-editor')) return
+        e.preventDefault()
+        setInspectorOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const updateDb = useCallback((db: string | null) => {
     setCurrentDb(db)
@@ -68,6 +114,7 @@ export function App(): JSX.Element {
     setRun({ status: 'idle' })
     setTabs([QUERY_TAB])
     setActiveId('query')
+    setInspected(null)
   }
 
   const execute = useCallback(async () => {
@@ -147,104 +194,117 @@ export function App(): JSX.Element {
   const queryActive = activeTab.kind === 'query'
 
   return (
-    <div className="app">
-      <header className="toolbar">
-        <button className="primary" onClick={execute} disabled={!conn || !queryActive || run.status === 'running'} title="Ctrl+Enter">
-          ▶ Run
-        </button>
-        <button onClick={() => void window.api.cancel()} disabled={run.status !== 'running'}>
-          ■ Cancel
-        </button>
-        <div className="spacer" />
-        {conn && (
-          <>
-            <span className="conn-label">
-              {conn.label} · {currentDb ?? 'no database'} · MySQL {conn.serverVersion}
-            </span>
-            <button onClick={disconnect}>Disconnect</button>
-          </>
-        )}
-      </header>
+    <InspectorContext.Provider value={inspectorApi}>
+      <div className={`app ${inspectorOpen ? 'with-inspector' : ''}`}>
+        <header className="toolbar">
+          <button className="primary" onClick={execute} disabled={!conn || !queryActive || run.status === 'running'} title="Ctrl+Enter">
+            ▶ Run
+          </button>
+          <button onClick={() => void window.api.cancel()} disabled={run.status !== 'running'}>
+            ■ Cancel
+          </button>
+          <div className="spacer" />
+          <button
+            className={inspectorOpen ? 'active-toggle' : ''}
+            onClick={() => setInspectorOpen((o) => !o)}
+            title="Show the selected cell's value in a side panel (Ctrl+I)"
+          >
+            ◧ Value
+          </button>
+          {conn && (
+            <>
+              <span className="conn-label">
+                {conn.label} · {currentDb ?? 'no database'} · MySQL {conn.serverVersion}
+              </span>
+              <button onClick={disconnect}>Disconnect</button>
+            </>
+          )}
+        </header>
 
-      <aside className="sidebar">
-        <SchemaTree
-          key={conn?.label ?? 'none'}
-          schemas={schemas}
-          currentDb={currentDb}
-          onUseDatabase={useDatabase}
-          onInsert={insertText}
-          onOpenTable={openTable}
-          onRefresh={refreshSchema}
-        />
-      </aside>
+        <aside className="sidebar">
+          <SchemaTree
+            key={conn?.label ?? 'none'}
+            schemas={schemas}
+            currentDb={currentDb}
+            onUseDatabase={useDatabase}
+            onInsert={insertText}
+            onOpenTable={openTable}
+            onRefresh={refreshSchema}
+          />
+        </aside>
 
-      <main className="main">
-        <nav className="tabbar">
-          {tabs.map((t) => (
-            <div
-              key={t.id}
-              className={`tab ${t.id === activeId ? 'active' : ''}`}
-              onClick={() => setActiveId(t.id)}
-              onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
-              title={t.kind === 'table' ? `${t.schema}.${t.table}` : 'SQL editor'}
-            >
-              {t.kind === 'query' ? (
-                <span>✎ Query</span>
-              ) : (
-                <>
-                  <span>
-                    {t.view === 'schema' ? 'ⓘ' : '▦'} {t.table}
-                  </span>
-                  <button
-                    className="tab-close"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      closeTab(t.id)
-                    }}
-                  >
-                    ✕
-                  </button>
-                </>
-              )}
-            </div>
-          ))}
-        </nav>
-
-        {/* Tabs stay mounted while hidden so the editor buffer, filters and pages survive switching. */}
-        <div className="tab-panel query-panel" hidden={!queryActive}>
-          <section className="editor">
-            <SqlEditor onMount={(e) => (editorRef.current = e)} onRun={execute} />
-          </section>
-          <section className="results">
-            <ResultsPanel run={run} />
-          </section>
-        </div>
-        {tabs.map(
-          (t) =>
-            t.kind === 'table' && (
-              <div key={t.id} className="tab-panel" hidden={t.id !== activeId}>
-                <TableView
-                  schema={t.schema}
-                  table={t.table}
-                  view={t.view}
-                  onViewChange={(v) => setTableView(t.id, v)}
-                  onOpenSql={openInEditor}
-                  onDirtyChange={(dirty) => {
-                    if (dirty) dirtyTabs.current.add(t.id)
-                    else dirtyTabs.current.delete(t.id)
-                  }}
-                />
+        <main className="main">
+          <nav className="tabbar">
+            {tabs.map((t) => (
+              <div
+                key={t.id}
+                className={`tab ${t.id === activeId ? 'active' : ''}`}
+                onClick={() => setActiveId(t.id)}
+                onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+                title={t.kind === 'table' ? `${t.schema}.${t.table}` : 'SQL editor'}
+              >
+                {t.kind === 'query' ? (
+                  <span>✎ Query</span>
+                ) : (
+                  <>
+                    <span>
+                      {t.view === 'schema' ? 'ⓘ' : '▦'} {t.table}
+                    </span>
+                    <button
+                      className="tab-close"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        closeTab(t.id)
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </>
+                )}
               </div>
-            )
+            ))}
+          </nav>
+
+          {/* Tabs stay mounted while hidden so the editor buffer, filters and pages survive switching. */}
+          <div className="tab-panel query-panel" hidden={!queryActive}>
+            <section className="editor">
+              <SqlEditor onMount={(e) => (editorRef.current = e)} onRun={execute} />
+            </section>
+            <section className="results">
+              <ResultsPanel run={run} />
+            </section>
+          </div>
+          {tabs.map(
+            (t) =>
+              t.kind === 'table' && (
+                <div key={t.id} className="tab-panel" hidden={t.id !== activeId}>
+                  <TableView
+                    schema={t.schema}
+                    table={t.table}
+                    view={t.view}
+                    onViewChange={(v) => setTableView(t.id, v)}
+                    onOpenSql={openInEditor}
+                    onDirtyChange={(dirty) => {
+                      if (dirty) dirtyTabs.current.add(t.id)
+                      else dirtyTabs.current.delete(t.id)
+                    }}
+                  />
+                </div>
+              )
+          )}
+        </main>
+
+        {inspectorOpen && (
+          <ValueInspector item={inspected} onClose={() => setInspectorOpen(false)} width={inspectorWidth} onResize={resizeInspector} />
         )}
-      </main>
 
-      <footer className="statusbar">
-        {queryActive ? <StatusText run={run} /> : <span>{activeTab.kind === 'table' && `${activeTab.schema}.${activeTab.table}`}</span>}
-      </footer>
+        <footer className="statusbar">
+          {queryActive ? <StatusText run={run} /> : <span>{activeTab.kind === 'table' && `${activeTab.schema}.${activeTab.table}`}</span>}
+        </footer>
 
-      {!conn && <ConnectDialog onConnected={onConnected} />}
-    </div>
+        {!conn && <ConnectDialog onConnected={onConnected} />}
+      </div>
+    </InspectorContext.Provider>
   )
 }
 
@@ -257,7 +317,7 @@ function ResultsPanel({ run }: { run: RunState }): JSX.Element {
     case 'error':
       return <pre className="error-panel">{run.error}</pre>
     case 'done':
-      if (run.result.kind === 'rows') return <ResultsGrid fields={run.result.fields} rows={run.result.rows} />
+      if (run.result.kind === 'rows') return <ResultsGrid fields={run.result.fields} rows={run.result.rows} sourceLabel="Query result" />
       return (
         <div className="placeholder">
           {run.result.affectedRows} row(s) affected

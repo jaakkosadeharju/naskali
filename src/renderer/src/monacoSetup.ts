@@ -17,7 +17,7 @@ loader.config({ monaco })
  * `'O\'Brien'`, ending the string early. Register a patched copy under our own
  * id (eagerly, so the built-in lazy loader can't override it).
  */
-export const SQL_LANG = 'sqltool-mysql'
+export const SQL_LANG = 'naskali-mysql'
 const stringRules = (q: string, token: string): monaco.languages.IMonarchLanguageRule[] => [
   [/\\./, token], // backslash escapes, e.g. \' \\ \n
   [new RegExp(`[^${q}\\\\]+`), token],

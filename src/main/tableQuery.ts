@@ -1,5 +1,5 @@
 import mysql, { type SqlValue } from 'mysql2'
-import { FILTER_OPS, type FilterOp, type RowFilter, type RowUpdate } from '../shared/types'
+import { FILTER_OPS, type CellValue, type ChangeSet, type FilterOp, type RowFilter } from '../shared/types'
 import { isEditableColumn } from '../shared/editing'
 
 // Turns UI filter rows into a parameterized WHERE clause. Identifiers are
@@ -76,39 +76,66 @@ export interface ColumnMeta {
   nullable: boolean
 }
 
-/**
- * Builds one parameterized UPDATE per changed row. Validates that each row is
- * addressed by exactly the table's primary key and only touches existing,
- * editable columns.
- */
-export function buildUpdates(
-  schema: string,
-  table: string,
-  updates: RowUpdate[],
-  columns: ColumnMeta[]
-): { sql: string; params: SqlValue[] }[] {
-  const pk = columns.filter((c) => c.key === 'PRI').map((c) => c.name)
-  if (pk.length === 0) throw new Error(`${table} has no primary key; editing is disabled`)
-  const byName = new Map(columns.map((c) => [c.name, c]))
-  const target = `${mysql.escapeId(schema)}.${mysql.escapeId(table)}`
+export interface ChangeStatement {
+  kind: 'delete' | 'update' | 'insert'
+  sql: string
+  params: SqlValue[]
+}
 
-  return updates.map((u) => {
-    const keyCols = Object.keys(u.key)
+/**
+ * Turns a change set into parameterized statements: deletes, then updates, then
+ * inserts. Validates that existing rows are addressed by exactly the table's
+ * primary key and that only existing, editable columns are written.
+ */
+export function buildChangeStatements(cs: ChangeSet, columns: ColumnMeta[]): ChangeStatement[] {
+  const pk = columns.filter((c) => c.key === 'PRI').map((c) => c.name)
+  if (pk.length === 0) throw new Error(`${cs.table} has no primary key; editing is disabled`)
+  const byName = new Map(columns.map((c) => [c.name, c]))
+  const target = `${mysql.escapeId(cs.schema)}.${mysql.escapeId(cs.table)}`
+  const id = (c: string): string => mysql.escapeId(c)
+
+  const where = (key: Record<string, CellValue>): { sql: string; params: SqlValue[] } => {
+    const keyCols = Object.keys(key)
     if (keyCols.length !== pk.length || !pk.every((k) => keyCols.includes(k))) {
       throw new Error('Row key must consist of exactly the primary key columns')
     }
-    if (pk.some((k) => u.key[k] === null)) throw new Error('Primary key value cannot be NULL')
-    const setCols = Object.keys(u.set)
-    if (setCols.length === 0) throw new Error('Update has no changed columns')
-    for (const c of setCols) {
+    if (pk.some((k) => key[k] === null)) throw new Error('Primary key value cannot be NULL')
+    return { sql: pk.map((k) => `${id(k)} = ?`).join(' AND '), params: pk.map((k) => key[k]) }
+  }
+  const checkWritable = (values: Record<string, CellValue>): string[] => {
+    const cols = Object.keys(values)
+    for (const c of cols) {
       const meta = byName.get(c)
       if (!meta) throw new Error(`Unknown column: ${c}`)
       if (!isEditableColumn(meta)) throw new Error(`Column ${c} is not editable`)
-      if (u.set[c] === null && !meta.nullable) throw new Error(`Column ${c} cannot be NULL`)
+      if (values[c] === null && !meta.nullable) throw new Error(`Column ${c} cannot be NULL`)
     }
-    const sql =
-      `UPDATE ${target} SET ${setCols.map((c) => `${mysql.escapeId(c)} = ?`).join(', ')}` +
-      ` WHERE ${pk.map((k) => `${mysql.escapeId(k)} = ?`).join(' AND ')} LIMIT 1`
-    return { sql, params: [...setCols.map((c) => u.set[c]), ...pk.map((k) => u.key[k])] }
-  })
+    return cols
+  }
+
+  const out: ChangeStatement[] = []
+  for (const d of cs.deletes) {
+    const w = where(d.key)
+    out.push({ kind: 'delete', sql: `DELETE FROM ${target} WHERE ${w.sql} LIMIT 1`, params: w.params })
+  }
+  for (const u of cs.updates) {
+    const cols = checkWritable(u.set)
+    if (cols.length === 0) throw new Error('Update has no changed columns')
+    const w = where(u.key)
+    out.push({
+      kind: 'update',
+      sql: `UPDATE ${target} SET ${cols.map((c) => `${id(c)} = ?`).join(', ')} WHERE ${w.sql} LIMIT 1`,
+      params: [...cols.map((c) => u.set[c]), ...w.params]
+    })
+  }
+  for (const ins of cs.inserts) {
+    const cols = checkWritable(ins.values)
+    out.push({
+      kind: 'insert',
+      // `() VALUES ()` inserts a row of defaults.
+      sql: `INSERT INTO ${target} (${cols.map(id).join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+      params: cols.map((c) => ins.values[c])
+    })
+  }
+  return out
 }

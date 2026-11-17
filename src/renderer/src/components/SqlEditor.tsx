@@ -5,7 +5,7 @@ import { statementAt } from '../sqlSplit'
 
 type CodeEditor = monaco.editor.IStandaloneCodeEditor
 
-const DRAFT_KEY = 'sqltool.draft'
+const DRAFT_KEY = 'naskali.draft'
 const DEFAULT_SQL = `-- Ctrl+Enter runs the statement under the cursor (or the selection)
 SELECT c.name, COUNT(*) AS orders, SUM(o.quantity * p.price) AS revenue
 FROM orders o

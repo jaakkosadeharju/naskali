@@ -1,4 +1,4 @@
-# SQL Tool (POC)
+# Naskali (POC)
 
 A desktop SQL client proof of concept: **Electron + React + Monaco + Glide Data Grid**, talking to **MySQL** via `mysql2`.
 
@@ -32,11 +32,20 @@ Connect with `127.0.0.1:3306`, user `dev`, password `dev`, database `shop`.
     Operators: `= != < <= > >=`, contains / not contains / starts with / ends with (wildcards escaped), raw `LIKE`/`NOT LIKE`,
     `IN`/`NOT IN` (comma list), `IS [NOT] NULL`. Filtering is server-side and fully parameterized; the generated SQL
     is shown and can be opened in the query editor
-- **Row editing** in the Data view (tables with a primary key): double-click a cell to edit, Delete sets NULL, paste works.
-  Changes are collected (highlighted, kept across pages/refresh) until you choose **Accept**, **View SQL** or **Cancel**.
-  Accept runs all `UPDATE … WHERE <pk> = ? LIMIT 1` statements in one transaction on a dedicated connection and rolls
-  everything back if any row no longer matches or MySQL rejects a value. Closing a tab with pending edits asks first.
+- **Row editing** in the Data view (tables with a primary key):
+  - *Edit*: double-click a cell; Delete on selected cells sets NULL; paste works
+  - *Add*: **+ Add row** inserts a new row at the top; untouched cells show `DEFAULT` (column default / auto_increment)
+  - *Delete*: select rows by clicking their numbers (shift/ctrl for more), then **− Delete rows** or the Delete key;
+    again to unmark. Deleting a new row just drops it
+  - Changes are collected (yellow = edited, green = new, red = deleted; kept across pages/refresh) until you choose
+    **Accept**, **View SQL** or **Cancel**. Accept runs deletes → updates → inserts in one transaction on a dedicated
+    connection; every statement must affect exactly one row, and any failure (row gone, FK/unique violation, missing
+    NOT NULL value) rolls everything back and keeps your pending changes. Closing a tab with pending changes asks first.
   Generated, BLOB/binary and spatial columns are read-only; views and tables without a PK are read-only
+- **Value inspector** (right panel; toolbar **◧ Value**, **Ctrl+I**, or double-click a read-only cell): shows the selected
+  cell of any result or data grid and follows the selection, also live while you edit. JSON (JSON columns, and text
+  that holds a JSON object/array) gets a collapsible tree – with JSON strings nested inside JSON parsed too – plus
+  highlighted *Formatted* and *Raw* views; other values show as wrapping text. Resizable (width remembered), closable
 - Schema-aware autocomplete: tables, columns, `alias.` → columns, `db.` → tables
 - Remembers the last connection; the password is stored only if an OS keyring is available (`safeStorage`)
 
@@ -46,7 +55,7 @@ Connect with `127.0.0.1:3306`, user `dev`, password `dev`, database `shop`.
 src/
   main/       Electron main process (Node): window, IPC handlers
     mysql.ts            MySqlSession – editor connection + metadata connection
-    tableQuery.ts       filter rows → parameterized WHERE; change sets → UPDATEs (validated)
+    tableQuery.ts       filter rows → parameterized WHERE; change sets → DELETE/UPDATE/INSERT (validated)
     connectionStore.ts  saved connection (userData/connection.json)
   preload/    contextBridge → window.api (the only renderer↔Node bridge)
   shared/     types shared across processes (SqlApi, QueryResult, …) + editing rules
@@ -62,8 +71,8 @@ Database drivers live only in the main process. The renderer is sandboxed (`cont
 ## Known POC limitations / next steps
 
 - One connection and one query editor; no query history or export yet
-- Editing is update-only (no insert/delete rows yet); no optimistic-concurrency check beyond "row still exists"
-  (a concurrent change to the same row is overwritten); no sorting by column header yet;
+- No optimistic-concurrency check beyond "row still exists" (a concurrent change to the same row is overwritten);
+  a new row's cell can't be set back to `DEFAULT` once edited (remove and re-add the row); no sorting by column header yet;
   `COUNT(*)` for the pager can be slow on huge tables
 - Editing an empty value into a NULL cell is treated as "no change" (use a SQL statement to store `''` there)
 - All rows are kept in memory up to the cap; a real version should page or stream into the grid

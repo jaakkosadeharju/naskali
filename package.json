@@ -1,7 +1,8 @@
 {
-  "name": "sql-tool",
+  "name": "naskali",
+  "productName": "Naskali",
   "version": "0.1.0",
-  "description": "SQL GUI proof of concept (Electron + Monaco + MySQL)",
+  "description": "Naskali – a SQL GUI proof of concept (Electron + Monaco + MySQL)",
   "main": "./out/main/index.js",
   "private": true,
   "scripts": {

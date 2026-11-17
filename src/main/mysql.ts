@@ -2,6 +2,7 @@ import mysql, { type Connection, type ConnectionOptions, type FieldPacket, type 
 import type {
   CellValue,
   ChangeSet,
+  ChangeSummary,
   ConnectionConfig,
   QueryResult,
   ResultField,
@@ -10,7 +11,7 @@ import type {
   TableDataResult,
   TableDetails
 } from '../shared/types'
-import { buildUpdates, buildWhere, type ColumnMeta } from './tableQuery'
+import { buildChangeStatements, buildWhere, type ColumnMeta } from './tableQuery'
 
 /** Rows beyond this are discarded (still drained from the server, but not kept in memory). */
 const MAX_ROWS = 100_000
@@ -325,24 +326,32 @@ export class MySqlSession {
   }
 
   async previewChanges(cs: ChangeSet): Promise<string[]> {
-    const stmts = buildUpdates(cs.schema, cs.table, cs.updates, await this.columnMeta(cs.schema, cs.table))
+    const stmts = buildChangeStatements(cs, await this.columnMeta(cs.schema, cs.table))
     return stmts.map((s) => mysql.format(s.sql, s.params) + ';')
   }
 
   /**
    * Applies a change set atomically on a dedicated short-lived connection, so it
-   * can't interleave with other work on the shared connections. Each UPDATE must
-   * match exactly one row (mysql2 reports *matched* rows), otherwise the whole
-   * set is rolled back – e.g. when someone else deleted the row meanwhile.
+   * can't interleave with other work on the shared connections. Every statement
+   * must affect exactly one row (for UPDATE mysql2 reports *matched* rows),
+   * otherwise the whole set is rolled back – e.g. when someone else deleted the
+   * row meanwhile.
    */
-  async applyChanges(cs: ChangeSet): Promise<{ statements: number }> {
+  async applyChanges(cs: ChangeSet): Promise<ChangeSummary> {
     if (!this.config) throw new Error('Not connected')
-    const stmts = buildUpdates(cs.schema, cs.table, cs.updates, await this.columnMeta(cs.schema, cs.table))
+    const stmts = buildChangeStatements(cs, await this.columnMeta(cs.schema, cs.table))
     const conn = await open(this.config)
     try {
       await run(conn, 'START TRANSACTION')
       for (const s of stmts) {
-        const res = await run<ResultSetHeader>(conn, s.sql, s.params)
+        let res: ResultSetHeader
+        try {
+          res = await run<ResultSetHeader>(conn, s.sql, s.params)
+        } catch (e) {
+          // Say which statement failed; the transaction is rolled back below.
+          const err = e as Error & { code?: string }
+          throw Object.assign(new Error(`${err.message}. Nothing was saved.\n${mysql.format(s.sql, s.params)}`), { code: err.code })
+        }
         if (res.affectedRows !== 1) {
           throw new Error(
             `No row matched – it may have been changed or deleted meanwhile. Nothing was saved.\n${mysql.format(s.sql, s.params)}`
@@ -350,7 +359,8 @@ export class MySqlSession {
         }
       }
       await run(conn, 'COMMIT')
-      return { statements: stmts.length }
+      const count = (k: string): number => stmts.filter((s) => s.kind === k).length
+      return { deleted: count('delete'), updated: count('update'), inserted: count('insert') }
     } catch (e) {
       await run(conn, 'ROLLBACK').catch(() => undefined)
       throw e
