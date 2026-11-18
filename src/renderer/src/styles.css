@@ -121,7 +121,7 @@ input:focus {
   min-height: 0;
   overflow: hidden;
 }
-.main {
+.app > main {
   grid-area: main;
   display: flex;
   flex-direction: column;

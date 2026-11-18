@@ -594,7 +594,7 @@ export function App(): JSX.Element {
           />
         </aside>
 
-        <main className="main">
+        <main>
           <nav className="tabbar" ref={tabbar} aria-label="Workspace tabs">
             {tabDrop && <div className="tab-drop-slot" style={{ left: tabDrop.slotLeft, width: tabDrop.width }} aria-hidden="true" />}
             {tabs.map((t, index) => (
