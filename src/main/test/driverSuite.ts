@@ -62,6 +62,18 @@ export function driverSuite(name: string, create: () => Driver, { schema, q }: S
       ])
     })
 
+    it('keeps a table joined to itself read-only', async () => {
+      const sql = 'SELECT a.id, a.name, b.email FROM customers a JOIN customers b ON b.id = a.id + 1'
+      const fields = (await select(sql)).fields
+      expect(sources(fields)).toEqual(['customers.id', 'customers.name', 'customers.email'])
+      expect((await resultEditInfo(driver, sql, fields)).tables).toEqual([])
+    })
+
+    it('keeps a UNION read-only', async () => {
+      const sql = 'SELECT id, name FROM customers UNION ALL SELECT id, name FROM products'
+      expect((await resultEditInfo(driver, sql, (await select(sql)).fields)).tables).toEqual([])
+    })
+
     it('saves edits to two tables in one transaction', async () => {
       const before = [await nameOf('customers', 2), await nameOf('products', 2)]
       try {
