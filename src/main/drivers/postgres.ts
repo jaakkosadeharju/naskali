@@ -115,29 +115,64 @@ export class PostgresDriver implements Driver {
     if (this.running) throw new Error('A query is already running')
     this.running = true
     const started = performance.now()
-    // A cursor fetches at most MAX_ROWS + 1 rows instead of the whole result.
-    const cursor = editor.query(new Cursor(sql, [], { rowMode: 'array' }))
     try {
-      const { rows, result } = await new Promise<{ rows: unknown[][]; result: pg.QueryResult }>((resolve, reject) =>
-        cursor.read(MAX_ROWS + 1, (err, rows, result) => (err ? reject(err) : resolve({ rows: rows as unknown[][], result })))
-      )
+      // A cursor fetches at most MAX_ROWS + 1 rows instead of the whole result.
+      const cursor = editor.query(new Cursor(sql, [], { rowMode: 'array' }))
+      let read: { rows: unknown[][]; result: pg.QueryResult }
+      try {
+        read = await new Promise((resolve, reject) =>
+          cursor.read(MAX_ROWS + 1, (err, rows, result) => (err ? reject(err) : resolve({ rows: rows as unknown[][], result })))
+        )
+      } finally {
+        await new Promise<void>((resolve) => cursor.close(() => resolve()))
+      }
+      const { rows, result } = read
       const elapsedMs = Math.round(performance.now() - started)
       if (!result.fields?.length) {
         return { kind: 'ok', affectedRows: result.rowCount ?? 0, insertId: null, info: result.command ?? '', elapsedMs }
       }
       const truncated = rows.length > MAX_ROWS
       const kept = truncated ? rows.slice(0, MAX_ROWS) : rows
+      const fields = this.toFields(result.fields)
+      await this.addSources(editor, result.fields, fields)
       return {
         kind: 'rows',
-        fields: this.toFields(result.fields),
+        fields,
         rows: kept.map((r) => r.map(normalise)),
         rowCount: truncated ? null : kept.length,
         truncated,
         elapsedMs
       }
     } finally {
-      await new Promise<void>((resolve) => cursor.close(() => resolve()))
       this.running = false
+    }
+  }
+
+  /**
+   * Names the table column behind each result column: the protocol only gives
+   * the table's OID and the column number (both 0 for expressions). Asked on the
+   * connection that ran the query, after it finished. Columns stay without a
+   * source when the lookup fails.
+   */
+  private async addSources(client: pg.Client, defs: pg.FieldDef[], fields: ResultField[]): Promise<void> {
+    const wanted = defs.filter((f) => f.tableID && f.columnID > 0)
+    if (wanted.length === 0) return
+    try {
+      const r = await client.query<{ oid: number; num: number; schema: string; table: string; column: string }>(
+        `SELECT c.oid::int AS oid, a.attnum::int AS num, n.nspname AS schema, c.relname AS table, a.attname AS column
+         FROM unnest($1::oid[], $2::int2[]) AS w(rel, num)
+         JOIN pg_attribute a ON a.attrelid = w.rel AND a.attnum = w.num
+         JOIN pg_class c ON c.oid = a.attrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace`,
+        [wanted.map((f) => f.tableID), wanted.map((f) => f.columnID)]
+      )
+      const byKey = new Map(r.rows.map((row) => [`${row.oid}:${row.num}`, row]))
+      defs.forEach((def, i) => {
+        const hit = byKey.get(`${def.tableID}:${def.columnID}`)
+        if (hit) fields[i].source = { schema: hit.schema, table: hit.table, column: hit.column }
+      })
+    } catch {
+      // e.g. the session's transaction was aborted meanwhile: the result is just not editable.
     }
   }
 

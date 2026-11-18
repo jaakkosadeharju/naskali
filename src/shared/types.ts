@@ -104,11 +104,22 @@ export interface SchemaInfo {
   procedures?: string[]
 }
 
+/** The table column a result column was read from, as the driver reports it. */
+export interface ColumnSource {
+  schema: string
+  table: string
+  column: string
+}
+
 export interface ResultField {
   name: string
   type: string
   /** Right-align in grids. */
   numeric: boolean
+  /** Set when the column is read straight from a table column; absent for expressions. */
+  source?: ColumnSource
+  /** Holds a value that can't address a row safely (e.g. a SQLite integer beyond JS precision). */
+  unsafeKey?: boolean
 }
 
 /** Cell values are normalised to JSON-friendly primitives before crossing IPC. */
@@ -230,6 +241,26 @@ export interface ChangeSummary {
   inserted: number
 }
 
+// ---- Editing query results -------------------------------------------------
+
+/** A table whose rows can be edited through a query result. */
+export interface ResultEditTable {
+  schema: string
+  table: string
+  /** The result field holding each primary key column. */
+  key: { column: string; field: number }[]
+  /** Editable result fields and the table columns they write. */
+  columns: { field: number; column: string; nullable: boolean }[]
+}
+
+export interface ResultEditInfo {
+  tables: ResultEditTable[]
+  /** Why a result field can't be edited, by field index. */
+  readOnly: Record<number, string>
+  /** Why nothing in the result can be edited (set when `tables` is empty). */
+  reason?: string
+}
+
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
 /** The API the preload script exposes to the renderer as `window.api`. */
@@ -256,7 +287,9 @@ export interface SqlApi {
   tableDetails(schema: string, table: string): Promise<IpcResult<TableDetails>>
   tableData(req: TableDataRequest): Promise<IpcResult<TableDataResult>>
   /** The statements `applyChanges` would run, with values inlined (for display). */
-  previewChanges(cs: ChangeSet): Promise<IpcResult<string[]>>
-  /** Runs the whole change set in one transaction; rolls back if any statement doesn't affect exactly one row. */
-  applyChanges(cs: ChangeSet): Promise<IpcResult<ChangeSummary>>
+  previewChanges(sets: ChangeSet[]): Promise<IpcResult<string[]>>
+  /** Runs all change sets in one transaction; rolls back if any statement doesn't affect exactly one row. */
+  applyChanges(sets: ChangeSet[]): Promise<IpcResult<ChangeSummary>>
+  /** Which parts of a query's single result set can be edited. */
+  resultEditInfo(sql: string, fields: ResultField[]): Promise<IpcResult<ResultEditInfo>>
 }

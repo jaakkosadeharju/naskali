@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TableFilter } from '../workspaceStore'
 import { FilterBar, newFilter, type DraftFilter } from './FilterBar'
 import { ExportRows } from './ExportRows'
-import { ResultsGrid, type CellLinks, type GridEditing } from './ResultsGrid'
+import { ResultsGrid, type CellLinks } from './ResultsGrid'
 import { TableSchemaView } from './TableSchemaView'
 import { SqlPreviewModal } from './SqlPreviewModal'
+import { PendingBar, summarize } from './PendingBar'
+import { useRowEditing } from '../useRowEditing'
+import type { EditTarget } from '../rowEditing'
 import { isEditableColumn, tableEditability } from '../../../shared/editing'
-import type { CellValue, ChangeSet, RowFilter, TableDataResult, TableDetails } from '../../../shared/types'
+import type { RowFilter, TableDataResult, TableDetails } from '../../../shared/types'
 
 const PAGE_SIZE = 500
 
@@ -28,30 +31,6 @@ interface Props {
   /** Opens a referenced table filtered to the given row (foreign-key links). */
   onOpenReference: (schema: string, table: string, filters: RowFilter[]) => void
 }
-
-/** Edits to one row, keyed in `pending` by its original primary key values. */
-interface PendingRow {
-  key: Record<string, CellValue>
-  set: Record<string, CellValue>
-}
-
-interface NewRow {
-  id: number
-  values: Record<string, CellValue>
-}
-let nextRowId = 1
-
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
-function summarize(inserted: number, updated: number, deleted: number): string {
-  const parts: string[] = []
-  if (inserted) parts.push(`${plural(inserted, 'row')} added`)
-  if (updated) parts.push(`${plural(updated, 'row')} updated`)
-  if (deleted) parts.push(`${plural(deleted, 'row')} deleted`)
-  return parts.join(', ') || 'nothing'
-}
-
-const sameValue = (a: CellValue, b: CellValue): boolean =>
-  a === b || (a !== null && b !== null && String(a) === String(b))
 
 const strip = (fs: DraftFilter[]): RowFilter[] => fs.map(({ id, ...filter }) => filter)
 
@@ -119,23 +98,12 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
   }
 
   // ---- Editing -------------------------------------------------------------
-  // Three kinds of pending change, all keyed so they survive paging/refresh:
-  //  - updates: by the row's original PK (JSON) → changed columns
-  //  - deletes: by the row's PK (JSON) → PK values
-  //  - inserts: new rows shown above the loaded rows; only explicitly set columns
-  const [pending, setPending] = useState<Map<string, PendingRow>>(new Map())
-  const [deleted, setDeleted] = useState<Map<string, Record<string, CellValue>>>(new Map())
-  const [inserts, setInserts] = useState<NewRow[]>([])
+  // Staged changes are keyed by primary key, so they survive paging and refreshes.
   const [selectedRows, setSelectedRows] = useState<number[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
   const [preview, setPreview] = useState<string[] | null>(null)
-
-  const changeCount = pending.size + deleted.size + inserts.length
-  useEffect(() => {
-    onDirtyChange(changeCount > 0)
-  }, [changeCount, onDirtyChange])
 
   const editDisabledReason = details?.editDisabledReason ?? data?.editDisabledReason
   const editability = editDisabledReason
@@ -143,154 +111,33 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
     : details ? tableEditability(details.type, details.columns) : null
   const fields = data?.fields
 
-  // Per-column facts for the current result, looked up by name in the table details.
-  const colInfo = useMemo(() => {
+  const pkFields = useMemo(() => {
     if (!details || !fields) return null
-    const byName = new Map(details.columns.map((c) => [c.name, c]))
-    const pkNames = details.columns.filter((c) => c.key === 'PRI').map((c) => c.name)
-    return {
-      index: new Map(fields.map((f, i) => [f.name, i])),
-      editable: fields.map((f) => {
-        const c = byName.get(f.name)
-        return !!c && isEditableColumn(c)
-      }),
-      nullable: fields.map((f) => byName.get(f.name)?.nullable ?? false),
-      pk: pkNames.map((n) => ({ name: n, idx: fields.findIndex((f) => f.name === n) }))
-    }
+    return details.columns.filter((c) => c.key === 'PRI').map((c) => ({ column: c.name, field: fields.findIndex((f) => f.name === c.name) }))
   }, [details, fields])
 
-  const rowKey = useCallback(
-    (row: CellValue[]): string => JSON.stringify(colInfo!.pk.map((p) => row[p.idx])),
-    [colInfo]
-  )
-  const pkValues = useCallback(
-    (row: CellValue[]): Record<string, CellValue> => Object.fromEntries(colInfo!.pk.map((p) => [p.name, row[p.idx]])),
-    [colInfo]
-  )
+  // The table as the grid's edit target; its rows are addressed by the primary key, which the page must hold.
+  const editable = !!editability?.editable
+  const targets = useMemo<EditTarget[]>(() => {
+    if (!details || !fields || !pkFields || !editable || pkFields.some((k) => k.field < 0)) return []
+    const byName = new Map(details.columns.map((c) => [c.name, c]))
+    const columns = fields.flatMap((f, field) => {
+      const c = byName.get(f.name)
+      return c && isEditableColumn(c) ? [{ field, column: c.name, nullable: c.nullable }] : []
+    })
+    return [{ schema, table, key: pkFields, columns }]
+  }, [details, fields, pkFields, editable, schema, table])
 
-  /** Grid rows: new rows first, then loaded rows with pending edits laid over them. */
-  const displayRows = useMemo(() => {
-    if (!data || !colInfo) return data?.rows ?? []
-    const newRows = inserts.map((ins) => data.fields.map((f) => (f.name in ins.values ? ins.values[f.name] : null)))
-    const loaded =
-      pending.size === 0 || data.editDisabledReason
-        ? data.rows
-        : data.rows.map((r) => {
-            const p = pending.get(rowKey(r))
-            if (!p) return r
-            const copy = r.slice()
-            for (const [col, v] of Object.entries(p.set)) copy[colInfo.index.get(col)!] = v
-            return copy
-          })
-    return inserts.length ? [...newRows, ...loaded] : loaded
-  }, [data, colInfo, inserts, pending, rowKey])
-
-  const touch = (): void => {
+  const touch = useCallback((): void => {
     setSavedMsg(null)
     setSaveError(null)
-  }
+  }, [])
+  const edits = useRowEditing({ fields, rows: data?.rows, targets, allowInsert: true, allowDelete: true, onStage: touch })
+  const { displayRows, editing, changeCount, newRowCount, isDeleted } = edits
 
-  const editing = useMemo<GridEditing | undefined>(() => {
-    if (!data || !colInfo || !editability?.editable || colInfo.pk.some((p) => p.idx < 0)) return undefined
-    const nNew = inserts.length
-    const loadedRow = (row: number): CellValue[] | undefined => (row >= nNew ? data.rows[row - nNew] : undefined)
-
-    return {
-      editable: (col) => colInfo.editable[col],
-      nullable: (col) => colInfo.nullable[col],
-      rowState: (row) => {
-        if (row < nNew) return 'new'
-        const r = loadedRow(row)
-        return r && deleted.has(rowKey(r)) ? 'deleted' : undefined
-      },
-      isDefault: (row, col) => row < nNew && !(data.fields[col].name in inserts[row].values),
-      isEdited: (row, col) => {
-        const r = loadedRow(row)
-        return !!r && data.fields[col].name in (pending.get(rowKey(r))?.set ?? {})
-      },
-      onEdit: (row, col, value, opts) => {
-        const name = data.fields[col].name
-        const explicit = !!opts?.explicit
-        if (row < nNew) {
-          const ins = inserts[row]
-          // Committing the editor on an untouched DEFAULT cell yields '' – no change.
-          if (!explicit && !(name in ins.values) && value === '') return
-          touch()
-          setInserts((prev) => prev.map((x) => (x.id === ins.id ? { ...x, values: { ...x.values, [name]: value } } : x)))
-          return
-        }
-        const orig = loadedRow(row)
-        if (!orig || deleted.has(rowKey(orig))) return
-        // Committing the editor on a NULL cell yields '' – treat that as "no change".
-        if (!explicit && displayRows[row][col] === null && value === '') return
-        const k = rowKey(orig)
-        touch()
-        setPending((prev) => {
-          const next = new Map(prev)
-          const entry: PendingRow = next.get(k) ?? { key: pkValues(orig), set: {} }
-          const set = { ...entry.set }
-          if (sameValue(orig[col], value)) delete set[name]
-          else set[name] = value
-          if (Object.keys(set).length === 0) next.delete(k)
-          else next.set(k, { ...entry, set })
-          return next
-        })
-      },
-      revertCell: (row, col) => {
-        const name = data.fields[col].name
-        touch()
-        if (row < nNew) {
-          const id = inserts[row].id
-          setInserts((prev) =>
-            prev.map((x) => {
-              if (x.id !== id) return x
-              const values = { ...x.values }
-              delete values[name]
-              return { ...x, values }
-            })
-          )
-          return
-        }
-        const orig = loadedRow(row)
-        if (!orig) return
-        const k = rowKey(orig)
-        setPending((prev) => {
-          const entry = prev.get(k)
-          if (!entry || !(name in entry.set)) return prev
-          const next = new Map(prev)
-          const set = { ...entry.set }
-          delete set[name]
-          if (Object.keys(set).length === 0) next.delete(k)
-          else next.set(k, { ...entry, set })
-          return next
-        })
-      },
-      onDeleteRows: (rows) => {
-        touch()
-        // New rows are simply dropped.
-        const dropIds = new Set(rows.filter((r) => r < nNew).map((r) => inserts[r].id))
-        if (dropIds.size) setInserts((prev) => prev.filter((x) => !dropIds.has(x.id)))
-        // Loaded rows toggle: if every selected one is already marked, unmark; otherwise mark all.
-        const loaded = rows.map(loadedRow).filter((r): r is CellValue[] => !!r)
-        if (loaded.length === 0) return
-        const keys = loaded.map(rowKey)
-        const unmark = keys.every((k) => deleted.has(k))
-        setDeleted((prev) => {
-          const next = new Map(prev)
-          loaded.forEach((r, i) => (unmark ? next.delete(keys[i]) : next.set(keys[i], pkValues(r))))
-          return next
-        })
-        // A deleted row's pending edits are moot.
-        if (!unmark) {
-          setPending((prev) => {
-            const next = new Map(prev)
-            keys.forEach((k) => next.delete(k))
-            return next
-          })
-        }
-      }
-    }
-  }, [data, colInfo, editability?.editable, inserts, pending, deleted, rowKey, pkValues, displayRows])
+  useEffect(() => {
+    onDirtyChange(changeCount > 0)
+  }, [changeCount, onDirtyChange])
 
   // For the value inspector: real column types, and rows described by primary key.
   const columnTypes = useMemo(() => {
@@ -333,50 +180,35 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
 
   const describeRow = useCallback(
     (row: number): string => {
-      if (row < inserts.length) return 'new row'
-      const r = data?.rows[row - inserts.length]
-      if (!r || !colInfo || colInfo.pk.some((p) => p.idx < 0)) return `row ${row + 1}`
-      const pk = colInfo.pk.map((p) => `${p.name} = ${r[p.idx]}`).join(', ')
-      return !data?.editDisabledReason && deleted.has(rowKey(r)) ? `${pk} (marked for deletion)` : pk
+      if (row < newRowCount) return 'new row'
+      const r = data?.rows[row - newRowCount]
+      if (!r || !pkFields?.length || pkFields.some((p) => p.field < 0)) return `row ${row + 1}`
+      const pk = pkFields.map((p) => `${p.column} = ${r[p.field]}`).join(', ')
+      return isDeleted(row) ? `${pk} (marked for deletion)` : pk
     },
-    [inserts.length, data, colInfo, deleted, rowKey]
+    [newRowCount, data, pkFields, isDeleted]
   )
 
-  const addRow = (): void => {
-    touch()
-    setInserts((prev) => [{ id: nextRowId++, values: {} }, ...prev])
-  }
-
-  const changeSet = (): ChangeSet => ({
-    schema,
-    table,
-    deletes: [...deleted.values()].map((key) => ({ key })),
-    updates: [...pending.values()].map(({ key, set }) => ({ key, set })),
-    inserts: inserts.map(({ values }) => ({ values }))
-  })
-
   const viewSql = async (): Promise<void> => {
-    const r = await window.api.previewChanges(changeSet())
+    const r = await window.api.previewChanges(edits.changeSets())
     if (r.ok) setPreview(r.value)
     else setSaveError(r.error)
   }
   const discard = (): void => {
-    setPending(new Map())
-    setDeleted(new Map())
-    setInserts([])
+    edits.discard()
     setSaveError(null)
   }
   const accept = async (): Promise<void> => {
     setSaving(true)
     setSaveError(null)
-    const r = await window.api.applyChanges(changeSet())
+    const r = await window.api.applyChanges(edits.changeSets())
     setSaving(false)
     if (!r.ok) {
       setSaveError(r.error)
       return
     }
     discard()
-    setSavedMsg(`Saved: ${summarize(r.value.inserted, r.value.updated, r.value.deleted)}`)
+    setSavedMsg(`Saved: ${summarize(r.value)}`)
     void loadData()
   }
 
@@ -400,11 +232,11 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
         </div>
         {view === 'data' && editability && editability.editable && (
           <>
-            <button onClick={addRow} disabled={!editing} title="Insert a new row (shown at the top)">
+            <button onClick={edits.addRow} disabled={!editing} title="Insert a new row (shown at the top)">
               + Add row
             </button>
             <button
-              onClick={() => editing?.onDeleteRows(selectedRows)}
+              onClick={() => edits.deleteRows(selectedRows)}
               disabled={!editing || selectedRows.length === 0}
               title="Mark selected rows for deletion (select rows by clicking their numbers). Again to unmark."
             >
@@ -445,7 +277,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
               <pre className="error-panel">{dataError}</pre>
             ) : data ? (
               <ResultsGrid fields={data.fields} rows={displayRows} editing={editing} onSelectedRowsChange={setSelectedRows}
-                selectionResetKey={inserts.length}
+                selectionResetKey={newRowCount}
                 sourceLabel={`${schema}.${table}`}
                 columnTypes={columnTypes}
                 describeRow={describeRow}
@@ -455,31 +287,15 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
               <div className="placeholder">Loading…</div>
             )}
           </div>
-          {(changeCount > 0 || saveError) && (
-            <div className={`pending-bar ${saveError ? 'has-error' : ''}`}>
-              {changeCount > 0 && <span>✎ Pending: {summarize(inserts.length, pending.size, deleted.size)}</span>}
-              {saveError && <span className="pending-error">{saveError}</span>}
-              <div className="spacer" />
-              {changeCount > 0 && (
-                <>
-                  <button onClick={viewSql} disabled={saving}>
-                    View SQL
-                  </button>
-                  <button onClick={discard} disabled={saving}>
-                    Cancel
-                  </button>
-                  <button className="primary" onClick={accept} disabled={saving}>
-                    {saving ? 'Saving…' : 'Accept'}
-                  </button>
-                </>
-              )}
-              {changeCount === 0 && (
-                <button className="icon" onClick={() => setSaveError(null)} title="Dismiss">
-                  ✕
-                </button>
-              )}
-            </div>
-          )}
+          <PendingBar
+            counts={edits.counts}
+            error={saveError}
+            saving={saving}
+            onViewSql={viewSql}
+            onCancel={discard}
+            onAccept={accept}
+            onDismissError={() => setSaveError(null)}
+          />
           <div className="pager">
             <button onClick={() => setOffset(0)} disabled={loading || offset === 0} title="First page">
               ⏮

@@ -27,8 +27,9 @@ const api: SqlApi = {
   changeTable: (action) => ipcRenderer.invoke('db:changeTable', action),
   tableDetails: (schema, table) => ipcRenderer.invoke('db:tableDetails', schema, table),
   tableData: (req) => ipcRenderer.invoke('db:tableData', req),
-  previewChanges: (cs) => ipcRenderer.invoke('db:previewChanges', cs),
-  applyChanges: (cs) => ipcRenderer.invoke('db:applyChanges', cs)
+  previewChanges: (sets) => ipcRenderer.invoke('db:previewChanges', sets),
+  applyChanges: (sets) => ipcRenderer.invoke('db:applyChanges', sets),
+  resultEditInfo: (sql, fields) => ipcRenderer.invoke('db:resultEditInfo', sql, fields)
 }
 
 contextBridge.exposeInMainWorld('api', api)

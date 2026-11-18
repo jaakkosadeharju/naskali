@@ -30,57 +30,87 @@ export const SPLIT_RULES: Record<DriverKind, SplitRules> = {
 const DOLLAR_TAG = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/
 
 /**
+ * The SQL with every quoted string/identifier replaced by `_` and every comment
+ * by spaces, keeping offsets: what is left is code a keyword search can trust.
+ */
+export function maskSql(sql: string, rules: SplitRules = SPLIT_RULES.mysql): string {
+  let out = ''
+  let i = 0
+  const skip = (end: number, fill: string): void => {
+    out += fill.repeat(end - i)
+    i = end
+  }
+  while (i < sql.length) {
+    const ch = sql[i]
+    const next = sql[i + 1]
+    if (ch === "'" || ch === '"' || ch === '`') {
+      let j = i + 1
+      while (j < sql.length && sql[j] !== ch) {
+        if (rules.backslashEscapes && sql[j] === '\\' && ch !== '`') j++
+        j++
+      }
+      // A doubled quote ('') simply closes and reopens.
+      skip(Math.min(j + 1, sql.length), '_')
+    } else if (rules.brackets && ch === '[') {
+      const close = sql.indexOf(']', i + 1)
+      skip(close === -1 ? sql.length : close + 1, '_')
+    } else if (rules.dollarQuotes && ch === '$' && DOLLAR_TAG.test(sql.slice(i, i + 64))) {
+      const tag = DOLLAR_TAG.exec(sql.slice(i, i + 64))![0]
+      const close = sql.indexOf(tag, i + tag.length)
+      skip(close === -1 ? sql.length : close + tag.length, '_')
+    } else if ((ch === '-' && next === '-' && (!rules.dashDashNeedsSpace || /\s/.test(sql[i + 2] ?? ' '))) || (rules.hashComments && ch === '#')) {
+      const close = sql.indexOf('\n', i)
+      skip(close === -1 ? sql.length : close, ' ')
+    } else if (ch === '/' && next === '*') {
+      const close = sql.indexOf('*/', i + 2)
+      skip(close === -1 ? sql.length : close + 2, ' ')
+    } else {
+      out += ch
+      i++
+    }
+  }
+  return out
+}
+
+/**
  * Splits SQL on `;`, ignoring semicolons inside quotes ('', "", `` plus
  * per-dialect $$…$$ and [..]) and comments. Doesn't handle MySQL `DELIMITER`
  * blocks or SQL Server `GO` separators.
  */
 export function splitStatements(sql: string, rules: SplitRules = SPLIT_RULES.mysql): Statement[] {
+  const masked = maskSql(sql, rules)
   const out: Statement[] = []
   let segStart = 0
-  let i = 0
   const push = (endExclusive: number): void => {
+    // Comment-only segments are blank once masked.
+    if (masked.slice(segStart, endExclusive).trim() === '') return
     const raw = sql.slice(segStart, endExclusive)
     const lead = raw.length - raw.trimStart().length
     const text = raw.trim()
-    if (text && !isOnlyComments(text, rules)) out.push({ text, start: segStart + lead, end: segStart + lead + text.length })
+    out.push({ text, start: segStart + lead, end: segStart + lead + text.length })
   }
-
-  while (i < sql.length) {
-    const ch = sql[i]
-    const next = sql[i + 1]
-    if (ch === "'" || ch === '"' || ch === '`') {
-      i++
-      while (i < sql.length && sql[i] !== ch) {
-        if (rules.backslashEscapes && sql[i] === '\\' && ch !== '`') i++
-        i++
-      }
-      i++ // a doubled quote ('') simply closes and reopens
-    } else if (rules.brackets && ch === '[') {
-      const close = sql.indexOf(']', i + 1)
-      i = close === -1 ? sql.length : close + 1
-    } else if (rules.dollarQuotes && ch === '$' && DOLLAR_TAG.test(sql.slice(i, i + 64))) {
-      const tag = DOLLAR_TAG.exec(sql.slice(i, i + 64))![0]
-      const close = sql.indexOf(tag, i + tag.length)
-      i = close === -1 ? sql.length : close + tag.length
-    } else if ((ch === '-' && next === '-' && (!rules.dashDashNeedsSpace || /\s/.test(sql[i + 2] ?? ' '))) || (rules.hashComments && ch === '#')) {
-      while (i < sql.length && sql[i] !== '\n') i++
-    } else if (ch === '/' && next === '*') {
-      const close = sql.indexOf('*/', i + 2)
-      i = close === -1 ? sql.length : close + 2
-    } else if (ch === ';') {
-      push(i)
-      segStart = ++i
-    } else {
-      i++
-    }
+  for (let i = masked.indexOf(';'); i !== -1; i = masked.indexOf(';', segStart)) {
+    push(i)
+    segStart = i + 1
   }
   push(sql.length)
   return out
 }
 
-function isOnlyComments(text: string, rules: SplitRules): boolean {
-  const lineComment = rules.hashComments ? /(--\s|#).*$/gm : /--.*$/gm
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(lineComment, '').trim() === ''
+/** Keywords that make a statement write data, create objects or run code. */
+const WRITE_KEYWORDS = /\b(?:INSERT|UPDATE|DELETE|MERGE|INTO|CALL|EXEC|EXECUTE)\b/i
+
+/**
+ * True for a single statement that only reads: it starts with SELECT, WITH or
+ * TABLE and has no writing keyword outside strings and comments (which rules out
+ * data-modifying CTEs, SELECT … INTO and procedure calls). Such a query is safe
+ * to run again, e.g. after saving edits made to its results.
+ */
+export function isPlainSelect(sql: string, rules: SplitRules = SPLIT_RULES.mysql): boolean {
+  const statements = splitStatements(sql, rules)
+  if (statements.length !== 1) return false
+  const code = maskSql(statements[0].text, rules).replace(/\bFOR\s+UPDATE\b/gi, '')
+  return /^\s*(?:SELECT|WITH|TABLE)\b/i.test(code) && !WRITE_KEYWORDS.test(code)
 }
 
 /** The statement containing the cursor, or the closest one before it. */
