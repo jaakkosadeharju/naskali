@@ -1147,12 +1147,14 @@ kbd {
 .connect-dialog {
   display: grid;
   grid-template-columns: minmax(175px, 0.8fr) minmax(0, 1.6fr);
+  grid-template-rows: max-content minmax(0, 1fr);
   column-gap: 20px;
   width: 760px;
+  height: min(550px, calc(100vh - 24px));
   max-width: calc(100vw - 24px);
   max-height: calc(100vh - 24px);
   padding-top: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 .connect-dialog[data-connection-color='blue'] {
   --dialog-gradient-highlight: #313e8a;
@@ -1222,9 +1224,11 @@ kbd {
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  min-height: 0;
   margin: 0;
-  padding: 0;
+  padding: 2px;
   border: 0;
+  overflow-y: auto;
 }
 .connection-actions {
   flex-wrap: wrap;
@@ -1276,6 +1280,12 @@ kbd {
 @media (max-width: 610px) {
   .connect-dialog {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    height: auto;
+    overflow: auto;
+  }
+  .connection-fields {
+    overflow: visible;
   }
   .connection-sidebar {
     padding: 0 0 12px;
@@ -1456,4 +1466,11 @@ button.node.procedure-node:hover:not(:disabled) {
 .query-results-actions .saved-msg {
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.grid-copy-menu hr {
+  width: 100%;
+  margin: 3px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
 }

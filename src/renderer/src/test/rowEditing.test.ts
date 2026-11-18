@@ -45,6 +45,15 @@ const rows: CellValue[][] = [
 ]
 
 describe('staging edits', () => {
+  it('keeps quick values distinct from literal cell text until saving', () => {
+    const original: CellValue[][] = [[1, 'DEFAULT']]
+    const staged = stageEdit(emptyStaged, [orders], original[0], 1, { kind: 'default' })
+    expect(overlay(staged, [orders], original)).toEqual(original)
+    expect(isEdited(staged, [orders], original[0], 1)).toBe(true)
+    expect(toChangeSets(staged, [orders])[0].updates[0].set).toEqual({ status: { kind: 'default' } })
+    expect(countChanges(revertEdit(staged, [orders], original[0], 1)).updated).toBe(0)
+  })
+
   it('shows an edit on every row of the same table row', () => {
     const staged = stageEdit(emptyStaged, joined, rows[0], 3, 'Ada L.')
     expect(overlay(staged, joined, rows).map((r) => r[3])).toEqual(['Ada L.', 'Ada L.', 'Bob', null])

@@ -124,6 +124,8 @@ export interface ResultField {
 
 /** Cell values are normalised to JSON-friendly primitives before crossing IPC. */
 export type CellValue = string | number | boolean | null
+export type CellAssignment = CellValue | { kind: 'default' | 'current' }
+
 export type ExportFormat = 'csv' | 'json'
 
 export interface QueryResultSet {
@@ -213,12 +215,12 @@ export interface RowUpdate {
   /** Original primary key values of the row (exactly the PK columns). */
   key: Record<string, CellValue>
   /** New values for changed columns. */
-  set: Record<string, CellValue>
+  set: Record<string, CellAssignment>
 }
 
 export interface RowInsert {
   /** Only explicitly set columns; omitted columns get their DEFAULT / auto_increment. */
-  values: Record<string, CellValue>
+  values: Record<string, CellAssignment>
 }
 
 export interface RowDelete {
@@ -250,7 +252,7 @@ export interface ResultEditTable {
   /** The result field holding each primary key column. */
   key: { column: string; field: number }[]
   /** Editable result fields and the table columns they write. */
-  columns: { field: number; column: string; nullable: boolean }[]
+  columns: { field: number; column: string; nullable: boolean; hasDefault?: boolean }[]
 }
 
 export interface ResultEditInfo {

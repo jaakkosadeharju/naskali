@@ -273,7 +273,7 @@ export class MssqlDriver implements Driver {
   async columnMeta(schema: string, table: string): Promise<ColumnMeta[]> {
     const cols = await this.columns(schema, table)
     if (cols.length === 0) throw new Error(`Table not found: ${schema}.${table}`)
-    return cols.map((c) => ({ name: c.name, type: c.type, key: c.pk ? 'PRI' : '', extra: c.extra, nullable: c.nullable }))
+    return cols.map((c) => ({ name: c.name, type: c.type, key: c.pk ? 'PRI' : '', extra: c.extra, nullable: c.nullable, default: c.def }))
   }
 
   async introspect(): Promise<SchemaInfo[]> {

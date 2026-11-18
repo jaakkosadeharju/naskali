@@ -1,4 +1,4 @@
-import type { CellValue, ChangeSet, ResultEditTable } from '../../shared/types'
+import type { CellAssignment, CellValue, ChangeSet, ResultEditTable } from '../../shared/types'
 
 // Staged edits for a grid of rows read from one or more tables (a table tab, or
 // a query result with joins). Pure functions over an immutable `Staged` value.
@@ -12,7 +12,7 @@ export interface PendingUpdate {
   target: number
   key: Record<string, CellValue>
   /** New values by table column name. */
-  set: Record<string, CellValue>
+  set: Record<string, CellAssignment>
 }
 
 export interface PendingDelete {
@@ -23,7 +23,7 @@ export interface PendingDelete {
 /** A row to insert into the first target; only explicitly set columns. */
 export interface NewRow {
   id: number
-  values: Record<string, CellValue>
+  values: Record<string, CellAssignment>
 }
 
 export interface Staged {
@@ -36,6 +36,11 @@ export interface Staged {
 }
 
 export const emptyStaged: Staged = { updates: new Map(), deletes: new Map(), inserts: [] }
+
+export function displayAssignment(value: CellAssignment): CellValue {
+  if (value === null || typeof value !== 'object') return value
+  return value.kind === 'default' ? 'DEFAULT' : 'NOW'
+}
 
 export const sameValue = (a: CellValue, b: CellValue): boolean => a === b || (a !== null && b !== null && String(a) === String(b))
 
@@ -71,13 +76,13 @@ export function canEdit(targets: readonly EditTarget[], row: readonly CellValue[
 }
 
 /** Stages `value` for a cell of an existing (original) row; setting the original value drops the edit. */
-export function stageEdit(staged: Staged, targets: readonly EditTarget[], row: readonly CellValue[], field: number, value: CellValue): Staged {
+export function stageEdit(staged: Staged, targets: readonly EditTarget[], row: readonly CellValue[], field: number, value: CellAssignment): Staged {
   const c = columnOf(targets, field)
   const id = c && rowId(targets, c.target, row)
   if (!c || !id) return staged
   const entry = staged.updates.get(id) ?? { target: c.target, key: keyOf(targets[c.target], row), set: {} }
   const set = { ...entry.set }
-  if (sameValue(row[field], value)) delete set[c.column]
+  if ((value === null || typeof value !== 'object') && sameValue(row[field], value)) delete set[c.column]
   else set[c.column] = value
   return withUpdate(staged, id, { ...entry, set })
 }
@@ -137,7 +142,7 @@ export function overlay(staged: Staged, targets: readonly EditTarget[], rows: re
       const update = id ? staged.updates.get(id) : undefined
       if (!update) return
       copy ??= row.slice()
-      for (const [column, value] of Object.entries(update.set)) copy[fieldOf[t].get(column)!] = value
+      for (const [column, value] of Object.entries(update.set)) copy[fieldOf[t].get(column)!] = displayAssignment(value)
     })
     return copy ?? row
   })
@@ -147,7 +152,7 @@ export function addInsert(staged: Staged, id: number): Staged {
   return { ...staged, inserts: [{ id, values: {} }, ...staged.inserts] }
 }
 
-export function setInsertValue(staged: Staged, id: number, column: string, value: CellValue): Staged {
+export function setInsertValue(staged: Staged, id: number, column: string, value: CellAssignment): Staged {
   return { ...staged, inserts: staged.inserts.map((r) => (r.id === id ? { ...r, values: { ...r.values, [column]: value } } : r)) }
 }
 

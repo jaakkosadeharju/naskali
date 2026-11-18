@@ -1,5 +1,5 @@
-import { FILTER_OPS, type CellValue, type ChangeSet, type RowFilter } from '../shared/types'
-import { isEditableColumn } from '../shared/editing'
+import { FILTER_OPS, type CellAssignment, type CellValue, type ChangeSet, type RowFilter } from '../shared/types'
+import { isEditableColumn, temporalCellKind } from '../shared/editing'
 import { bind, escapeLike, qualify, type Param, type Sql, type SqlDialect } from './dialect'
 
 // Turns UI filter rows into a parameterized WHERE clause, and change sets into
@@ -84,6 +84,7 @@ export interface ColumnMeta {
   /** Contains 'GENERATED' for computed columns. */
   extra: string
   nullable: boolean
+  default?: string | null
 }
 
 export interface ChangeStatement extends Sql {
@@ -109,7 +110,7 @@ export function buildChangeStatements(d: SqlDialect, cs: ChangeSet, columns: Col
     if (pk.some((k) => key[k] === null)) throw new Error('Primary key value cannot be NULL')
     return pk.map((k) => `${d.quote(k)} = ${bind(params, key[k])}`).join(' AND ')
   }
-  const checkWritable = (values: Record<string, CellValue>): string[] => {
+  const checkWritable = (values: Record<string, CellAssignment>): string[] => {
     const cols = Object.keys(values)
     for (const c of cols) {
       const meta = byName.get(c)
@@ -118,6 +119,27 @@ export function buildChangeStatements(d: SqlDialect, cs: ChangeSet, columns: Col
       if (values[c] === null && !meta.nullable) throw new Error(`Column ${c} cannot be NULL`)
     }
     return cols
+  }
+
+  const assignment = (name: string, value: CellAssignment, params: Param[]): string => {
+    if (value === null || typeof value !== 'object') return bind(params, value)
+    const column = byName.get(name)!
+    if (value.kind === 'default') {
+      if (d.kind === 'sqlite' || (!column.nullable && column.default == null)) {
+        throw new Error(`DEFAULT is unavailable for column ${name}`)
+      }
+      return 'DEFAULT'
+    }
+    if (value.kind === 'current') {
+      const kind = temporalCellKind(column.type, d.kind === 'mssql')
+      if (!kind) throw new Error(`Current date or time is unavailable for column ${name}`)
+      if (d.kind === 'mssql') {
+        if (kind === 'date' || kind === 'time') return `CONVERT(${kind}, SYSDATETIME())`
+        return /^datetimeoffset/i.test(column.type) ? 'SYSDATETIMEOFFSET()' : 'SYSDATETIME()'
+      }
+      return kind === 'date' ? 'CURRENT_DATE' : kind === 'time' ? 'CURRENT_TIME' : 'CURRENT_TIMESTAMP'
+    }
+    throw new Error('Unknown cell assignment')
   }
 
   const out: ChangeStatement[] = []
@@ -129,7 +151,7 @@ export function buildChangeStatements(d: SqlDialect, cs: ChangeSet, columns: Col
     const cols = checkWritable(u.set)
     if (cols.length === 0) throw new Error('Update has no changed columns')
     const params: Param[] = []
-    const set = cols.map((c) => `${d.quote(c)} = ${bind(params, u.set[c])}`).join(', ')
+    const set = cols.map((c) => `${d.quote(c)} = ${assignment(c, u.set[c], params)}`).join(', ')
     out.push({ kind: 'update', text: d.updateOne(target, set, where(u.key, params)), params })
   }
   for (const ins of cs.inserts) {
@@ -138,7 +160,7 @@ export function buildChangeStatements(d: SqlDialect, cs: ChangeSet, columns: Col
     const text =
       cols.length === 0
         ? d.insertDefaults(target)
-        : `INSERT INTO ${target} (${cols.map((c) => d.quote(c)).join(', ')}) VALUES (${cols.map((c) => bind(params, ins.values[c])).join(', ')})`
+        : `INSERT INTO ${target} (${cols.map((c) => d.quote(c)).join(', ')}) VALUES (${cols.map((c) => assignment(c, ins.values[c], params)).join(', ')})`
     out.push({ kind: 'insert', text, params })
   }
   return out

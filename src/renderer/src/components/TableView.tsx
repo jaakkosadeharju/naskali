@@ -123,7 +123,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
     const byName = new Map(details.columns.map((c) => [c.name, c]))
     const columns = fields.flatMap((f, field) => {
       const c = byName.get(f.name)
-      return c && isEditableColumn(c) ? [{ field, column: c.name, nullable: c.nullable }] : []
+      return c && isEditableColumn(c) ? [{ field, column: c.name, nullable: c.nullable, hasDefault: c.default !== null }] : []
     })
     return [{ schema, table, key: pkFields, columns }]
   }, [details, fields, pkFields, editable, schema, table])

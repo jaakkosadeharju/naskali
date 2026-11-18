@@ -55,7 +55,7 @@ function resolveTable(src: SourceTable, details: TableDetails, readOnly: Record<
   const columns: ResultEditTable['columns'] = []
   for (const { index, source } of src.fields) {
     const column = byName.get(source.column)
-    if (column && isEditableColumn(column)) columns.push({ field: index, column: column.name, nullable: column.nullable })
+    if (column && isEditableColumn(column)) columns.push({ field: index, column: column.name, nullable: column.nullable, ...(column.default != null ? { hasDefault: true } : {}) })
     else readOnly[index] = column ? NOT_EDITABLE : `Unknown column ${source.column}`
   }
   return {

@@ -203,9 +203,9 @@ export class MySqlDriver implements Driver {
   }
 
   async columnMeta(schema: string, table: string): Promise<ColumnMeta[]> {
-    const rows = await run<{ name: string; type: string; key: string; extra: string; nullable: string }[]>(
+    const rows = await run<{ name: string; type: string; key: string; extra: string; nullable: string; default: string | null }[]>(
       await this.requireMeta(),
-      `SELECT COLUMN_NAME AS name, COLUMN_TYPE AS type, COLUMN_KEY AS \`key\`, EXTRA AS extra, IS_NULLABLE AS nullable
+      `SELECT COLUMN_NAME AS name, COLUMN_TYPE AS type, COLUMN_KEY AS \`key\`, EXTRA AS extra, IS_NULLABLE AS nullable, COLUMN_DEFAULT AS \`default\`
        FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION`,
       [schema, table]
     )

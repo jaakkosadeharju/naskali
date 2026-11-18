@@ -16,8 +16,10 @@ import { createPortal } from 'react-dom'
 import { COPY_COMMANDS } from '../../../shared/menuCommands'
 import { useMenuActions } from '../menuActions'
 import { exportRows, exportSelectionAsJson } from '../../../shared/exportRows'
-import type { CellValue, ExportFormat, ResultField } from '../../../shared/types'
+import { temporalCellKind } from '../../../shared/editing'
+import type { CellAssignment, CellValue, ExportFormat, ResultField } from '../../../shared/types'
 import { useInspector } from '../inspector'
+import { editorDriver } from '../monacoSetup'
 
 
 const darkTheme: Partial<Theme> = {
@@ -68,6 +70,7 @@ export interface GridEditing {
   /** Why a cell can't be edited, for the inspector; defaults to a generic reason. */
   readOnlyReason?: (row: number, col: number) => string | undefined
   nullable: (col: number) => boolean
+  hasDefault: (col: number) => boolean
   isEdited: (row: number, col: number) => boolean
   rowState: (row: number) => 'new' | 'deleted' | undefined
   /** New-row cell that hasn't been given a value (the column's DEFAULT applies). */
@@ -76,7 +79,7 @@ export interface GridEditing {
    * Stages a cell change. `explicit` marks deliberate edits (e.g. from the inspector) so an empty
    * string on a NULL/DEFAULT cell counts as a change rather than "editor committed without typing".
    */
-  onEdit: (row: number, col: number, value: CellValue, opts?: { explicit?: boolean }) => void
+  onEdit: (row: number, col: number, value: CellAssignment, opts?: { explicit?: boolean }) => void
   /** Drops a cell's pending change (new-row cell: back to DEFAULT). */
   revertCell: (row: number, col: number) => void
   /** Delete key with whole rows selected. */
@@ -133,12 +136,13 @@ function copySelection(selection: GridSelection, col: number, row: number, colum
   if (range) {
     return {
       columns: indexes(range.x, Math.min(columnCount, range.x + range.width)),
-      rows: indexes(range.y, Math.min(rowCount, range.y + range.height))
+      rows: indexes(range.y, Math.min(rowCount, range.y + range.height)),
+      singleCell: current.rangeStack.length === 0 && range.width === 1 && range.height === 1
     }
   }
-  if (selection.rows.hasIndex(row)) return { columns: indexes(0, columnCount), rows: selection.rows.toArray().filter((r) => r < rowCount) }
-  if (selection.columns.hasIndex(col)) return { columns: selection.columns.toArray().filter((c) => c < columnCount), rows: indexes(0, rowCount) }
-  return { columns: [col], rows: [row] }
+  if (selection.rows.hasIndex(row)) return { columns: indexes(0, columnCount), rows: selection.rows.toArray().filter((r) => r < rowCount), singleCell: false }
+  if (selection.columns.hasIndex(col)) return { columns: selection.columns.toArray().filter((c) => c < columnCount), rows: indexes(0, rowCount), singleCell: false }
+  return { columns: [col], rows: [row], singleCell: true }
 }
 
 function indexes(start: number, end: number): number[] {
@@ -150,6 +154,7 @@ interface CopyMenu {
   y: number
   columns: number[]
   rows: number[]
+  singleCell: boolean
 }
 
 export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selectionResetKey, sourceLabel, columnTypes, describeRow, cellLinks, readOnlyColumns }: Props): JSX.Element {
@@ -419,6 +424,32 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
     void copyAs(format, target)
   })
 
+  const quickValues: { label: string; apply: () => void }[] = []
+  if (menu?.singleCell && editing) {
+    const [col] = menu.columns
+    const [row] = menu.rows
+    const state = editing.rowState(row)
+    if (editing.editable(row, col) && state !== 'deleted') {
+      const driver = editorDriver()
+      const type = columnTypes?.[col] ?? fields[col].type
+      const set = (label: string, value: CellAssignment): void => {
+        quickValues.push({ label, apply: () => editing.onEdit(row, col, value, { explicit: true }) })
+      }
+      if (editing.nullable(col)) set('Set to NULL', null)
+      if (state === 'new') {
+        quickValues.push({ label: 'Set to default', apply: () => editing.revertCell(row, col) })
+      } else if (driver !== 'sqlite' && (editing.hasDefault(col) || editing.nullable(col))) {
+        set('Set to default', { kind: 'default' })
+      }
+      const temporal = temporalCellKind(type, driver === 'mssql')
+      if (temporal) set(temporal === 'date' ? 'Set to today' : 'Set to now', { kind: 'current' })
+      if (/^bool(?:ean)?$/i.test(type) || (driver === 'mssql' && /^bit$/i.test(type))) {
+        set('Set to true', true)
+        set('Set to false', false)
+      }
+    }
+  }
+
   return (
     <>
       <DataEditor
@@ -432,7 +463,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
         onGridSelectionChange={onGridSelectionChange}
         onCellActivated={onCellActivated}
         onCellContextMenu={(cell, event) => {
-          if (cell[0] < 0 || cell[1] >= rows.length) return
+          if (cell[0] < 0 || cell[1] < 0 || cell[1] >= rows.length) return
           event.preventDefault()
           openCopyMenu(cell, event.bounds.x + event.localEventX, event.bounds.y + event.localEventY)
         }}
@@ -462,10 +493,10 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
           ref={menuRef}
           className="grid-copy-menu"
           role="group"
-          aria-label="Copy cells"
+          aria-label={quickValues.length ? 'Cell actions' : 'Copy cells'}
           style={{
             left: `clamp(4px, ${menu.x}px, calc(100vw - 196px))`,
-            top: `clamp(4px, ${menu.y}px, calc(100vh - 120px))`
+            top: `clamp(4px, ${menu.y}px, calc(100vh - ${120 + quickValues.length * 28}px))`
           }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
@@ -477,6 +508,13 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
             if (!e.currentTarget.contains(e.relatedTarget)) setMenu(null)
           }}
         >
+          {quickValues.map(({ label, apply }) => (
+            <button key={label} type="button" onClick={() => {
+              apply()
+              closeCopyMenu()
+            }}>{label}</button>
+          ))}
+          {quickValues.length > 0 && <hr />}
           <button type="button" onClick={() => void copyAs('csv', menu)}>Copy as CSV</button>
           <button type="button" onClick={() => void copyAs('json', menu)}>Copy as JSON</button>
           <button type="button" onClick={() => void copyAs('json-with-headers', menu)}>Copy as JSON with headers</button>

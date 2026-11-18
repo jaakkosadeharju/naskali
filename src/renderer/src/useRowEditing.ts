@@ -6,6 +6,7 @@ import {
   canEdit,
   clearInsertValue,
   countChanges,
+  displayAssignment,
   dropInserts,
   emptyStaged,
   isDeleted,
@@ -72,9 +73,9 @@ export function useRowEditing({ fields, rows, targets, allowInsert = false, allo
     () => new Map((targets[0]?.columns ?? []).map((c) => [c.field, c])),
     [targets]
   )
-  const nullable = useMemo(() => {
-    const out = new Map<number, boolean>()
-    for (const t of targets) for (const c of t.columns) out.set(c.field, c.nullable)
+  const editableColumns = useMemo(() => {
+    const out = new Map<number, EditTarget['columns'][number]>()
+    for (const t of targets) for (const c of t.columns) out.set(c.field, c)
     return out
   }, [targets])
 
@@ -84,7 +85,7 @@ export function useRowEditing({ fields, rows, targets, allowInsert = false, allo
     const newRows = staged.inserts.map((ins) =>
       fields.map((_, i) => {
         const column = insertColumn.get(i)?.column
-        return column !== undefined && column in ins.values ? ins.values[column] : null
+        return column !== undefined && column in ins.values ? displayAssignment(ins.values[column]) : null
       })
     )
     return [...newRows, ...shown]
@@ -118,7 +119,8 @@ export function useRowEditing({ fields, rows, targets, allowInsert = false, allo
         }
         return readOnly?.[col]
       },
-      nullable: (col) => nullable.get(col) ?? false,
+      nullable: (col) => !!editableColumns.get(col)?.nullable,
+      hasDefault: (col) => !!editableColumns.get(col)?.hasDefault,
       rowState: (row) => {
         if (row < nNew) return 'new'
         const r = loadedRow(row)
@@ -135,6 +137,7 @@ export function useRowEditing({ fields, rows, targets, allowInsert = false, allo
       },
       onEdit: (row, col, value, opts) => {
         const explicit = !!opts?.explicit
+        if (!explicit && value === displayRows[row]?.[col]) return
         if (row < nNew) {
           const ins = staged.inserts[row]
           const column = insertColumn.get(col)?.column
@@ -162,7 +165,7 @@ export function useRowEditing({ fields, rows, targets, allowInsert = false, allo
       },
       onDeleteRows: deleteRows
     }
-  }, [fields, targets, nNew, insertColumn, loadedRow, readOnly, nullable, staged, displayRows, stage, deleteRows])
+  }, [fields, targets, nNew, insertColumn, loadedRow, readOnly, editableColumns, staged, displayRows, stage, deleteRows])
 
   const rowDeleted = useCallback(
     (row: number): boolean => {

@@ -9,7 +9,8 @@ export interface EditableColumnMeta {
 /** Binary/spatial values are shown as lossy text, and generated columns can't be written. */
 export function isEditableColumn(c: EditableColumnMeta): boolean {
   return (
-    !/GENERATED/i.test(c.extra) &&
+    // MySQL's DEFAULT_GENERATED describes a default expression on a writable column.
+    !/\bGENERATED\b/i.test(c.extra) &&
     // Not round-trippable as text. (SQL Server's binary `timestamp` is reported as `rowversion`.)
     !/blob|binary|bytea|^image$|geometry|geography|point|linestring|polygon|hierarchyid|sql_variant|rowversion|^xml$/i.test(
       c.type
@@ -29,4 +30,14 @@ export function tableEditability(
     return { editable: false, reason: 'Read-only: binary primary key' }
   }
   return { editable: true }
+}
+
+/** Classifies SQL date/time types while excluding SQL Server's binary timestamp alias. */
+export function temporalCellKind(type: string, sqlServer: boolean): 'date' | 'time' | 'timestamp' | undefined {
+  const name = type.toLowerCase().trim()
+  if (name.endsWith('[]')) return undefined
+  if (name === 'date') return 'date'
+  if (/^(?:time(?:[( ]|$)|timetz$)/.test(name)) return 'time'
+  if (/^(?:datetime(?:2|offset)?|smalldatetime)(?:[( ]|$)/.test(name)) return 'timestamp'
+  if (!sqlServer && /^(?:timestamp(?:[( ]|$)|timestamptz$)/.test(name)) return 'timestamp'
 }

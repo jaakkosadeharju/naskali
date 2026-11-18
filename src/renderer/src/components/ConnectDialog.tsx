@@ -90,6 +90,22 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
     if (r.ok && r.value) update({ file: r.value })
   }
 
+  async function connect(config: ConnectionConfig, theme: ConnectionColor, profileId: string | null): Promise<void> {
+    if (busy) return
+    setBusy('connecting')
+    setError(null)
+    setTestPassed(false)
+    try {
+      const r = await window.api.connect(config)
+      if (r.ok) onConnected(config, r.value, theme, profileId)
+      else setError(r.error)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault()
     if (busy) return
@@ -124,15 +140,8 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
       return
     }
 
-    setBusy('connecting')
-    setError(null)
-    setTestPassed(false)
-    const r = await window.api.connect(cfg)
-    setBusy(null)
-    if (r.ok) {
-      const profile = saved.find((connection) => connection.id === selectedId)
-      onConnected(cfg, r.value, color, profile && sameTarget(profile.config, cfg) ? profile.id : null)
-    } else setError(r.error)
+    const profile = saved.find((connection) => connection.id === selectedId)
+    await connect(cfg, color, profile && sameTarget(profile.config, cfg) ? profile.id : null)
   }
 
   async function remove(): Promise<void> {
@@ -172,7 +181,9 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
                   type="button"
                   aria-current={connection.id === selectedId}
                   disabled={busy !== null}
+                  title="Double-click to connect"
                   onClick={() => selectConnection(connection)}
+                  onDoubleClick={() => void connect(connection.config, connection.color ?? 'blue', connection.id)}
                 >
                   <span className="connection-color-swatch" data-connection-color={connection.color ?? 'blue'} aria-hidden="true" />
                   <span className="saved-connection-details">
