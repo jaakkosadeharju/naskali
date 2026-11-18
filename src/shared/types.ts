@@ -90,7 +90,7 @@ export type TableAction =
   | { kind: 'dropColumn'; schema: string; table: string; column: string }
   | { kind: 'drop' | 'truncate'; schema: string; table: string }
 
-export type ExplorerMenuAction = 'new' | 'edit' | 'drop' | 'truncate'
+export type ExplorerMenuAction = 'new' | 'edit' | 'drop' | 'truncate' | 'procedure-create' | 'procedure-exec'
 
 export interface TableInfo {
   name: string
@@ -281,9 +281,11 @@ export interface SqlApi {
   useSchema(name: string): Promise<IpcResult<void>>
   /** Shows a file picker for a SQLite database; null when cancelled. */
   pickSqliteFile(): Promise<IpcResult<string | null>>
-  explorerMenu(target: 'schema' | 'table'): Promise<IpcResult<ExplorerMenuAction | null>>
+  explorerMenu(target: 'schema' | 'table' | 'procedure'): Promise<IpcResult<ExplorerMenuAction | null>>
   previewCreateTable(action: CreateTableAction): Promise<IpcResult<string>>
   changeTable(action: TableAction): Promise<IpcResult<void>>
+  procedureCall(schema: string, name: string): Promise<IpcResult<string>>
+  procedureDefinition(schema: string, name: string): Promise<IpcResult<string>>
   tableDetails(schema: string, table: string): Promise<IpcResult<TableDetails>>
   tableData(req: TableDataRequest): Promise<IpcResult<TableDataResult>>
   /** The statements `applyChanges` would run, with values inlined (for display). */

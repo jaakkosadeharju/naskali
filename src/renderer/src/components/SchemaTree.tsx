@@ -10,13 +10,15 @@ interface Props {
   onUseDatabase?: (name: string) => void
   onInsert: (text: string) => void
   onOpenTable: (schema: string, table: string, view: 'data' | 'schema') => void
+  onProcedureMenu?: (schema: string, name: string) => void
+  procedureError?: string | null
   onNewTable?: (schema?: string) => void
   onContextMenu?: (schema: string, table?: string) => void
   onRefresh?: () => void
   onDisconnect?: () => void
 }
 
-export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onInsert, onOpenTable, onNewTable, onContextMenu, onRefresh, onDisconnect }: Props): JSX.Element {
+export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onInsert, onOpenTable, onProcedureMenu, procedureError, onNewTable, onContextMenu, onRefresh, onDisconnect }: Props): JSX.Element {
   const [open, setOpen] = useState<Set<string>>(() => new Set(currentDb ? [currentDb] : []))
   const [filter, setFilter] = useState('')
   const activeSchema = activeTable?.schema
@@ -57,6 +59,7 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
       <div className="tree-filter">
         <input aria-label="Filter database objects" placeholder={`Filter (${MOD}P: open table)`} value={filter} onChange={(e) => setFilter(e.target.value)} />
       </div>
+      {procedureError && <p className="procedure-error" role="alert">{procedureError}</p>}
       <ul>
         {schemas.map((s) => {
           const tables = f ? s.tables.filter((t) => t.name.toLowerCase().includes(f)) : s.tables
@@ -163,7 +166,23 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
                       <div className="node procedure-heading">Stored procedures</div>
                       <ul>
                         {procedures.map((name) => (
-                          <li key={name} className="node procedure-node" title={`${s.name}.${name}`}>{name}</li>
+                          <li key={name}>
+                            <button
+                              type="button"
+                              className="node procedure-node"
+                              title={`Actions for ${s.name}.${name}`}
+                              aria-haspopup="menu"
+                              disabled={!onProcedureMenu}
+                              onClick={() => onProcedureMenu?.(s.name, name)}
+                              onContextMenu={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                onProcedureMenu?.(s.name, name)
+                              }}
+                            >
+                              {name}
+                            </button>
+                          </li>
                         ))}
                       </ul>
                     </li>

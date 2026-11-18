@@ -38,6 +38,8 @@ export interface Driver {
   useSchema(name: string): Promise<void>
 
   introspect(): Promise<SchemaInfo[]>
+  procedureCall?(schema: string, name: string): Promise<string>
+  procedureDefinition?(schema: string, name: string): Promise<string>
   tableDetails(schema: string, table: string): Promise<TableDetails>
   /** Throws when the table doesn't exist. */
   columnMeta(schema: string, table: string): Promise<ColumnMeta[]>

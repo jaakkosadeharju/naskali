@@ -1328,9 +1328,20 @@ button.danger {
   font-weight: 650;
   color: var(--muted);
 }
-.node.procedure-node {
-  overflow: hidden;
-  text-overflow: ellipsis;
+button.node.procedure-node {
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+button.node.procedure-node:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+.procedure-error {
+  margin: 6px 8px;
+  color: var(--error);
+  overflow-wrap: anywhere;
 }
 .query-results-actions > button,
 .query-results-actions .saved-msg {

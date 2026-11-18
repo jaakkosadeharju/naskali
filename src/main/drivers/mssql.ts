@@ -1,6 +1,7 @@
+import { maskSql, SPLIT_RULES } from '../../shared/sqlSplit'
 import sql from 'mssql'
 import type { ConnectionInfo, QueryResult, QueryResultSet, ResultField, SchemaInfo, ServerConnectionConfig, TableDetails } from '../../shared/types'
-import { DIALECTS, type Param } from '../dialect'
+import { DIALECTS, qualify, type Param } from '../dialect'
 import type { ColumnMeta } from '../tableQuery'
 import { MAX_ROWS, buildSchemaTree, generateDdl, groupForeignKeys, groupIndexes, normalise, type Driver, type Exec, type Rows } from './types'
 
@@ -309,6 +310,43 @@ export class MssqlDriver implements Driver {
       if (schema) (schema.procedures ??= []).push(procedure.name)
     }
     return tree
+  }
+
+  async procedureCall(schema: string, name: string): Promise<string> {
+    const parameters = await this.objects<{ name: string | null; output: boolean | null }>(
+      `SELECT a.name, a.is_output AS [output]
+       FROM sys.procedures p
+       JOIN sys.schemas s ON s.schema_id = p.schema_id
+       LEFT JOIN sys.parameters a ON a.object_id = p.object_id AND a.parameter_id > 0
+       WHERE s.name = @p1 AND p.name = @p2 AND p.is_ms_shipped = 0
+       ORDER BY a.parameter_id`,
+      [schema, name]
+    )
+    if (!parameters.length) throw new Error(`Stored procedure not found: ${schema}.${name}`)
+
+    const args = parameters.flatMap((parameter) => parameter.name === null ? [] : [
+      `${parameter.name} = <value>${parameter.output ? ' /* OUTPUT parameter */' : ''}`
+    ])
+    return `EXEC ${qualify(this.dialect, schema, name)}${args.length ? '\n  ' + args.join(',\n  ') : ''};`
+  }
+
+  async procedureDefinition(schema: string, name: string): Promise<string> {
+    const [procedure] = await this.objects<{ definition: string | null }>(
+      `SELECT OBJECT_DEFINITION(p.object_id) AS definition
+       FROM sys.procedures p JOIN sys.schemas s ON s.schema_id = p.schema_id
+       WHERE s.name = @p1 AND p.name = @p2 AND p.is_ms_shipped = 0`,
+      [schema, name]
+    )
+    if (!procedure) throw new Error(`Stored procedure not found: ${schema}.${name}`)
+    const { definition } = procedure
+    if (!definition) {
+      throw new Error(`Definition unavailable for ${schema}.${name}. It may be encrypted, compiled from CLR code, or require VIEW DEFINITION permission.`)
+    }
+
+    const code = maskSql(definition, SPLIT_RULES.mssql)
+    const header = /^(\s*)(?:CREATE\s+OR\s+)?ALTER(?=\s+PROC(?:EDURE)?\b)/i.exec(code)
+    // SQL Server stores the last CREATE or ALTER statement, including its header comments.
+    return header ? definition.slice(0, header[1].length) + 'CREATE' + definition.slice(header[0].length) : definition
   }
 
   async tableDetails(schema: string, table: string): Promise<TableDetails> {

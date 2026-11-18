@@ -176,20 +176,34 @@ handle('db:pickSqliteFile', async () => {
   const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
-handle('db:explorerMenu', (target: 'schema' | 'table') =>
+handle('db:explorerMenu', (target: 'schema' | 'table' | 'procedure') =>
   new Promise<ExplorerMenuAction | null>((resolve) => {
+    const item = (label: string, action: ExplorerMenuAction): Electron.MenuItemConstructorOptions =>
+      ({ label, click: () => resolve(action) })
     const menu = Menu.buildFromTemplate(target === 'schema'
-      ? [{ label: 'New table…', click: () => resolve('new') }]
-      : [
-          { label: 'Edit schema…', click: () => resolve('edit') },
-          { type: 'separator' },
-          { label: 'Truncate table…', click: () => resolve('truncate') },
-          { label: 'Drop table…', click: () => resolve('drop') }
-        ])
+      ? [item('New table…', 'new')]
+      : target === 'procedure'
+        ? [item('Open CREATE statement', 'procedure-create'), item('Open EXEC statement', 'procedure-exec')]
+        : [
+            item('Edit schema…', 'edit'),
+            { type: 'separator' },
+            item('Truncate table…', 'truncate'),
+            item('Drop table…', 'drop')
+          ])
     menu.popup({ callback: () => resolve(null) })
   }))
 handle('db:previewCreateTable', async (action: CreateTableAction) => createTableSql(requireDriver().dialect, action))
 handle('db:changeTable', (action: TableAction) => changeTable(requireDriver(), action))
+handle('db:procedureCall', async (schema: string, name: string) => {
+  const driver = requireDriver()
+  if (!driver.procedureCall) throw new Error('Stored procedure calls are unavailable for this connection')
+  return driver.procedureCall(schema, name)
+})
+handle('db:procedureDefinition', async (schema: string, name: string) => {
+  const driver = requireDriver()
+  if (!driver.procedureDefinition) throw new Error('Stored procedure definitions are unavailable for this connection')
+  return driver.procedureDefinition(schema, name)
+})
 handle('db:tableDetails', (schema: string, table: string) => requireDriver().tableDetails(schema, table))
 handle('db:tableData', (req: TableDataRequest) => tableData(requireDriver(), req))
 handle('db:previewChanges', (sets: ChangeSet[]) => previewChanges(requireDriver(), sets))

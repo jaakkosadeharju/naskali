@@ -111,6 +111,7 @@ export function App(): JSX.Element {
   const [schemas, setSchemas] = useState<SchemaInfo[]>([])
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeId, setActiveId] = useState(FIRST_QUERY.id)
+  const [procedureError, setProcedureError] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
   const [designer, setDesigner] = useState<DesignerRequest | null>(null)
   const [tableVersions, setTableVersions] = useState<Record<string, number>>({})
@@ -243,6 +244,7 @@ export function App(): JSX.Element {
     if (runningQuery.current || disconnecting) return
     if (dirtyTabs.current.size > 0 && !window.confirm('Some tabs have unsaved changes. Discard them and disconnect?')) return
     setDisconnecting(true)
+    setProcedureError(null)
     await window.api.disconnect()
     connectionGeneration.current++
     dirtyTabs.current.clear()
@@ -358,6 +360,25 @@ export function App(): JSX.Element {
   const openInEditor = (sql: string): void => {
     const text = sql.trimEnd()
     if (text) newQueryTab(text.endsWith(';') ? text : `${text};`)
+  }
+
+  const openProcedureMenu = async (schema: string, name: string): Promise<void> => {
+    const generation = connectionGeneration.current
+    const menu = await window.api.explorerMenu('procedure')
+    if (generation !== connectionGeneration.current) return
+    if (!menu.ok) {
+      setProcedureError(menu.error)
+      return
+    }
+    if (menu.value !== 'procedure-create' && menu.value !== 'procedure-exec') return
+
+    setProcedureError(null)
+    const result = menu.value === 'procedure-create'
+      ? await window.api.procedureDefinition(schema, name)
+      : await window.api.procedureCall(schema, name)
+    if (generation !== connectionGeneration.current) return
+    if (result.ok) newQueryTab(result.value)
+    else setProcedureError(result.error)
   }
 
   const closeTab = (id: string): void => {
@@ -476,7 +497,9 @@ export function App(): JSX.Element {
     const result = await window.api.explorerMenu(table === undefined ? 'schema' : 'table')
     if (generation !== connectionGeneration.current || runningQuery.current || !result.ok || !result.value) return
     if (result.value === 'new') newTable(schema)
-    else if (table !== undefined) setDesigner({ kind: result.value, schema, table })
+    else if (table !== undefined && (result.value === 'edit' || result.value === 'drop' || result.value === 'truncate')) {
+      setDesigner({ kind: result.value, schema, table })
+    }
   }
 
   const applyTableAction = async (action: TableAction): Promise<string | null> => {
@@ -587,6 +610,8 @@ export function App(): JSX.Element {
             onUseDatabase={conn?.info.capabilities.switchSchema ? useSchema : undefined}
             onInsert={insertText}
             onOpenTable={openTable}
+            onProcedureMenu={workspaceInteractive ? openProcedureMenu : undefined}
+            procedureError={procedureError}
             onNewTable={canChangeSchema && schemas.length > 0 ? newTable : undefined}
             onContextMenu={canChangeSchema ? openExplorerMenu : undefined}
             onRefresh={workspaceInteractive ? refreshSchema : undefined}
