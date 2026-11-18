@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { TableFilter } from '../workspaceStore'
 import { FilterBar, newFilter, type DraftFilter } from './FilterBar'
 import { ExportRows } from './ExportRows'
 import { ResultsGrid, type CellLinks, type GridEditing } from './ResultsGrid'
@@ -21,7 +22,8 @@ interface Props {
   /** Reports whether this tab has unsaved edits (so closing it can ask first). */
   onDirtyChange: (dirty: boolean) => void
   /** Filters applied when the tab opens (e.g. following a foreign key). */
-  initialFilters?: RowFilter[]
+  initialFilter?: TableFilter
+  onFilterApply: (filter: TableFilter) => void
   /** Opens a referenced table filtered to the given row (foreign-key links). */
   onOpenReference: (schema: string, table: string, filters: RowFilter[]) => void
 }
@@ -50,20 +52,15 @@ function summarize(inserted: number, updated: number, deleted: number): string {
 const sameValue = (a: CellValue, b: CellValue): boolean =>
   a === b || (a !== null && b !== null && String(a) === String(b))
 
-interface Applied {
-  filters: RowFilter[]
-  match: 'all' | 'any'
-}
-
 const strip = (fs: DraftFilter[]): RowFilter[] => fs.map(({ id, ...filter }) => filter)
 
-export function TableView({ sqlite, schema, table, view, onViewChange, onOpenSql, onDirtyChange, initialFilters, onOpenReference }: Props): JSX.Element {
+export function TableView({ sqlite, schema, table, view, onViewChange, onOpenSql, onDirtyChange, initialFilter, onFilterApply, onOpenReference }: Props): JSX.Element {
   const [details, setDetails] = useState<TableDetails | null>(null)
   const [detailsError, setDetailsError] = useState<string | null>(null)
 
-  const [draft, setDraft] = useState<DraftFilter[]>(() => (initialFilters ?? []).map((f) => ({ ...newFilter(f.column), ...f })))
-  const [match, setMatch] = useState<'all' | 'any'>('all')
-  const [applied, setApplied] = useState<Applied>(() => ({ filters: initialFilters ?? [], match: 'all' }))
+  const [draft, setDraft] = useState<DraftFilter[]>(() => (initialFilter?.filters ?? []).map((f) => ({ ...newFilter(f.column), ...f })))
+  const [match, setMatch] = useState<'all' | 'any'>(initialFilter?.match ?? 'all')
+  const [applied, setApplied] = useState<TableFilter>(() => initialFilter ?? { filters: [], match: 'all' })
   const [offset, setOffset] = useState(0)
   const [data, setData] = useState<TableDataResult | null>(null)
   const [dataError, setDataError] = useState<string | null>(null)
@@ -109,7 +106,9 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onOpenSql
   }, [dataWanted, loadData])
 
   const apply = (): void => {
-    setApplied({ filters: strip(draft), match })
+    const filter = { filters: strip(draft), match }
+    setApplied(filter)
+    onFilterApply(filter)
     setOffset(0)
   }
   const dirty = JSON.stringify({ filters: strip(draft), match }) !== JSON.stringify(applied)
@@ -386,15 +385,15 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onOpenSql
   return (
     <div className="table-view">
       <div className="table-header">
-        <span className="table-title">
-          <span className="muted">{schema}.</span>
+        <h1 className="table-title" title={`${schema}.${table}`}>
+          <span>{schema}</span>
           {table}
-        </span>
+        </h1>
         <div className="segmented">
-          <button className={view === 'data' ? 'active' : ''} onClick={() => onViewChange('data')}>
+          <button className={view === 'data' ? 'active' : ''} aria-pressed={view === 'data'} onClick={() => onViewChange('data')}>
             Data
           </button>
-          <button className={view === 'schema' ? 'active' : ''} onClick={() => onViewChange('schema')}>
+          <button className={view === 'schema' ? 'active' : ''} aria-pressed={view === 'schema'} onClick={() => onViewChange('schema')}>
             Schema
           </button>
         </div>

@@ -5,27 +5,6 @@ import { SPLIT_RULES, statementAt } from '../../../shared/sqlSplit'
 
 type CodeEditor = monaco.editor.IStandaloneCodeEditor
 
-const DRAFT_KEY = 'naskali.draft'
-const DEFAULT_SQL = `-- Ctrl+Enter runs the statement under the cursor (or the selection)
-SELECT c.name, COUNT(*) AS orders, SUM(o.quantity * p.price) AS revenue
-FROM orders o
-JOIN customers c ON c.id = o.customer_id
-JOIN products p ON p.id = o.product_id
-GROUP BY c.id
-ORDER BY revenue DESC
-LIMIT 50;
-
-SELECT * FROM orders;
-`
-
-function loadDraft(): string {
-  try {
-    return localStorage.getItem(DRAFT_KEY) ?? DEFAULT_SQL
-  } catch {
-    return DEFAULT_SQL
-  }
-}
-
 /** The selection if there is one, otherwise the statement under the cursor; flashes it. */
 export function sqlToRun(editor: CodeEditor): string | null {
   const model = editor.getModel()
@@ -47,13 +26,14 @@ export function sqlToRun(editor: CodeEditor): string | null {
 }
 
 interface Props {
-  primary: boolean
-  initialSql?: string
+  initialSql: string
+  selectOnMount?: boolean
+  onChange: (sql: string) => void
   onMount: (editor: CodeEditor) => void
   onRun: () => void
 }
 
-export function SqlEditor({ primary, initialSql, onMount, onRun }: Props): JSX.Element {
+export function SqlEditor({ initialSql, selectOnMount, onChange, onMount, onRun }: Props): JSX.Element {
   // Monaco commands are registered once, so call through a ref to see the latest handler.
   const onRunRef = useRef(onRun)
   useEffect(() => {
@@ -63,27 +43,22 @@ export function SqlEditor({ primary, initialSql, onMount, onRun }: Props): JSX.E
   return (
     <Editor
       defaultLanguage={editorLanguage()}
-      defaultValue={primary ? loadDraft() : initialSql ?? ''}
-      theme="vs-dark"
+      defaultValue={initialSql}
+      theme="naskali-dark"
       options={{
         minimap: { enabled: false },
         fontSize: 14,
+        lineHeight: 22,
+        padding: { top: 10, bottom: 10 },
         automaticLayout: true,
         scrollBeyondLastLine: false,
         wordBasedSuggestions: 'off',
         tabSize: 2
       }}
-      onChange={(v) => {
-        if (!primary) return
-        try {
-          localStorage.setItem(DRAFT_KEY, v ?? '')
-        } catch {
-          /* storage unavailable: drafts just won't persist */
-        }
-      }}
+      onChange={(value) => onChange(value ?? '')}
       onMount={(editor) => {
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current())
-        const range = initialSql && editor.getModel()?.getFullModelRange()
+        const range = selectOnMount && editor.getModel()?.getFullModelRange()
         if (range) editor.setSelection(range)
         if (!editor.getDomNode()?.closest('[hidden]')) editor.focus()
         onMount(editor)

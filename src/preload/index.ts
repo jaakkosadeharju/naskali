@@ -1,8 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { MenuCommand } from '../shared/menuCommands'
 import type { SqlApi } from '../shared/types'
 
 // The only bridge between the sandboxed renderer and Node: a small, typed API.
 const api: SqlApi = {
+  onMenuCommand: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, command: MenuCommand): void => listener(command)
+    ipcRenderer.on('menu:command', receive)
+    return () => { ipcRenderer.removeListener('menu:command', receive) }
+  },
+  setMenuAvailability: (commands) => ipcRenderer.send('menu:availability', commands),
   connect: (config) => ipcRenderer.invoke('db:connect', config),
   testConnection: (config) => ipcRenderer.invoke('db:testConnection', config),
   disconnect: () => ipcRenderer.invoke('db:disconnect'),

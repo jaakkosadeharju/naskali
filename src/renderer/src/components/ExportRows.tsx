@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { EXPORT_COMMANDS } from '../../../shared/menuCommands'
+import { useMenuActions } from '../menuActions'
 import type { CellValue, ExportFormat, ResultField } from '../../../shared/types'
 
 interface Props {
@@ -26,6 +28,10 @@ export function ExportRows({ fields, rows, name, page, disabled }: Props): JSX.E
       setBusy(false)
     }
   }
+
+  useMenuActions(EXPORT_COMMANDS, !busy && !disabled, (command) => {
+    void save(command === 'export-csv' ? 'csv' : 'json')
+  })
 
   return (
     <div className="row-export">

@@ -3,6 +3,7 @@ import { monaco } from './monacoSetup'
 import { completionState } from './completion'
 import { ConnectDialog } from './components/ConnectDialog'
 import { SchemaTree } from './components/SchemaTree'
+import { QuerySplit } from './components/QuerySplit'
 import { SqlEditor, sqlToRun } from './components/SqlEditor'
 import { ExportRows } from './components/ExportRows'
 import { ResultsGrid } from './components/ResultsGrid'
@@ -12,11 +13,15 @@ import { TablePalette } from './components/TablePalette'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
 import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo } from '../../shared/types'
 import { setEditorDialect } from './monacoSetup'
+import type { MenuCommand } from '../../shared/menuCommands'
+import { MenuActionsContext, type RegisterMenuAction } from './menuActions'
+import { loadWorkspace, saveWorkspace, type WorkspaceTab } from './workspaceStore'
 
 interface Connection {
   /** e.g. "dev@127.0.0.1:5432/shop" or "shop.sqlite" */
   label: string
   color: ConnectionColor
+  profileId: string | null
   info: ConnectionInfo
 }
 
@@ -33,11 +38,8 @@ type RunState =
   | { status: 'done'; sql: string; result: QueryResult }
   | { status: 'error'; sql: string; error: string }
 
-type QueryTab = { id: string; kind: 'query'; number: number; run: RunState; initialSql?: string }
-
-type Tab =
-  | QueryTab
-  | { id: string; kind: 'table'; schema: string; table: string; view: TableViewMode; filters?: RowFilter[] }
+type QueryTab = Extract<WorkspaceTab, { kind: 'query' }> & { run: RunState; selectOnMount?: boolean }
+type Tab = QueryTab | Extract<WorkspaceTab, { kind: 'table' }>
 
 interface TabDrag {
   pointerId: number
@@ -53,20 +55,27 @@ interface TabDrop {
   from: number
   to: number
   width: number
+  shift: number
   offset: number
   slotLeft: number
 }
 
 function tabDragOffset(drag: TabDrop, index: number): number {
   if (index === drag.from) return drag.offset
-  if (index > drag.from && index <= drag.to) return -drag.width
-  if (index < drag.from && index >= drag.to) return drag.width
+  if (index > drag.from && index <= drag.to) return -drag.shift
+  if (index < drag.from && index >= drag.to) return drag.shift
   return 0
 }
 
 const filterSummary = (filters: RowFilter[]): string => filters.map((f) => `${f.column} = ${f.value}`).join(', ')
 
-const FIRST_QUERY: QueryTab = { id: 'query:1', kind: 'query', number: 1, run: { status: 'idle' } }
+const FIRST_QUERY: QueryTab = {
+  id: 'query:1',
+  kind: 'query',
+  number: 1,
+  run: { status: 'idle' },
+  sql: '-- Ctrl+Enter runs the statement under the cursor or the selected SQL\nSELECT 1 AS example;\n'
+}
 
 const RECENT_TABLES_KEY = 'naskali.recentTables'
 const MAX_RECENT = 20
@@ -94,7 +103,7 @@ export function App(): JSX.Element {
   const [conn, setConn] = useState<Connection | null>(null)
   const [currentDb, setCurrentDb] = useState<string | null>(null)
   const [schemas, setSchemas] = useState<SchemaInfo[]>([])
-  const [tabs, setTabs] = useState<Tab[]>([FIRST_QUERY])
+  const [tabs, setTabs] = useState<Tab[]>([])
   const [activeId, setActiveId] = useState(FIRST_QUERY.id)
   const [disconnecting, setDisconnecting] = useState(false)
   const tabbar = useRef<HTMLElement>(null)
@@ -104,6 +113,7 @@ export function App(): JSX.Element {
   const editors = useRef(new Map<string, monaco.editor.IStandaloneCodeEditor>())
   const nextQueryNumber = useRef(2)
   const lastQueryId = useRef(FIRST_QUERY.id)
+  const connectionGeneration = useRef(0)
   const runningQuery = useRef<string | null>(null)
   // Tabs with unsaved row edits. Only read when closing, so a ref (no re-render) is enough.
   const dirtyTabs = useRef(new Set<string>())
@@ -179,16 +189,30 @@ export function App(): JSX.Element {
   }, [])
 
   const refreshSchema = useCallback(async () => {
+    const generation = connectionGeneration.current
     const r = await window.api.introspect()
-    if (r.ok) {
+    if (r.ok && generation === connectionGeneration.current) {
       setSchemas(r.value)
       completionState.schemas = r.value
     }
   }, [])
 
   const onConnected = useCallback(
-    (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor) => {
-      setConn({ label: connectionLabel(cfg, info), color, info })
+    (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor, profileId: string | null) => {
+      const workspace = profileId ? loadWorkspace(profileId) : null
+      const restored = workspace?.tabs.map((tab): Tab =>
+        tab.kind === 'query' ? { ...tab, run: { status: 'idle' } } : tab
+      ) ?? [FIRST_QUERY]
+      lastQueryId.current = restored.find((tab) =>
+        tab.kind === 'query' && tab.id === workspace?.lastQueryId
+      )?.id ?? FIRST_QUERY.id
+      nextQueryNumber.current = restored.reduce((next, tab) =>
+        tab.kind === 'query' ? Math.max(next, tab.number + 1) : next, 2
+      )
+      setTabs(restored)
+      setActiveId(restored.find((tab) => tab.id === workspace?.activeId)?.id ?? lastQueryId.current)
+      connectionGeneration.current++
+      setConn({ label: connectionLabel(cfg, info), color, profileId, info })
       setEditorDialect(info.driver)
       updateDb(info.schema)
       void refreshSchema()
@@ -196,17 +220,31 @@ export function App(): JSX.Element {
     [refreshSchema, updateDb]
   )
 
+  const profileId = conn?.profileId
+  useEffect(() => {
+    if (!profileId) return
+    const savedTabs = tabs.map((tab): WorkspaceTab => {
+      if (tab.kind === 'table') return tab
+      const { id, kind, number, sql, split } = tab
+      return { id, kind, number, sql, split }
+    })
+    saveWorkspace(profileId, { tabs: savedTabs, activeId, lastQueryId: lastQueryId.current })
+  }, [profileId, tabs, activeId])
+
   const disconnect = async (): Promise<void> => {
     if (runningQuery.current || disconnecting) return
     if (dirtyTabs.current.size > 0 && !window.confirm('Some tables have unsaved changes. Discard them and disconnect?')) return
     setDisconnecting(true)
     await window.api.disconnect()
+    connectionGeneration.current++
     dirtyTabs.current.clear()
+    editors.current.clear()
+    lastQueryId.current = FIRST_QUERY.id
     setConn(null)
     setSchemas([])
     completionState.schemas = []
-    setTabs((ts) => ts.flatMap((t): QueryTab[] => t.kind === 'query' ? [{ ...t, run: { status: 'idle' } }] : []))
-    setActiveId(lastQueryId.current)
+    setTabs([])
+    setActiveId(FIRST_QUERY.id)
     setInspected(null)
     setPaletteOpen(false)
     setDisconnecting(false)
@@ -294,7 +332,7 @@ export function App(): JSX.Element {
 
   const newQueryTab = (initialSql?: string): void => {
     const number = nextQueryNumber.current++
-    const tab: QueryTab = { id: `query:${number}`, kind: 'query', number, run: { status: 'idle' }, initialSql }
+    const tab: QueryTab = { id: `query:${number}`, kind: 'query', number, run: { status: 'idle' }, sql: initialSql ?? '', selectOnMount: !!initialSql }
     setTabs((ts) => [...ts, tab])
     activateTab(tab)
   }
@@ -359,15 +397,24 @@ export function App(): JSX.Element {
     suppressTabClick.current = true
 
     const source = drag.bounds[drag.from]
+    const first = drag.bounds[0]
     const last = drag.bounds[drag.bounds.length - 1]
-    const left = Math.max(0, Math.min(source.left + dx, last.left + last.width - source.width))
+    const gap = drag.bounds[1].left - first.left - first.width
+    const left = Math.max(first.left, Math.min(source.left + dx, last.left + last.width - source.width))
     drag.to = drag.bounds.filter((bounds, index) => {
       const center = bounds.left + bounds.width / 2
       return index < drag.from ? left >= center : index > drag.from && left + source.width >= center
     }).length
     const target = drag.bounds[drag.to]
     const slotLeft = drag.to > drag.from ? target.left + target.width - source.width : target.left
-    setTabDrop({ from: drag.from, to: drag.to, width: source.width, offset: left - source.left, slotLeft })
+    setTabDrop({
+      from: drag.from,
+      to: drag.to,
+      width: source.width,
+      shift: source.width + gap,
+      offset: left - source.left,
+      slotLeft
+    })
   }
 
   const finishTabDrag = (e: PointerEvent<HTMLButtonElement>): void => {
@@ -383,6 +430,61 @@ export function App(): JSX.Element {
   const activeTab = tabs.find((t) => t.id === activeId) ?? FIRST_QUERY
   const queryRunning = tabs.some((t) => t.kind === 'query' && t.run.status === 'running')
 
+  const scopedActions = useRef(new Map<MenuCommand, (command: MenuCommand) => void>())
+  const [scopedCommands, setScopedCommands] = useState<MenuCommand[]>([])
+  const registerMenuAction = useCallback<RegisterMenuAction>((commands, run) => {
+    for (const command of commands) scopedActions.current.set(command, run)
+    setScopedCommands([...scopedActions.current.keys()])
+    return () => {
+      for (const command of commands) {
+        if (scopedActions.current.get(command) === run) scopedActions.current.delete(command)
+      }
+      setScopedCommands([...scopedActions.current.keys()])
+    }
+  }, [])
+
+  const workspaceReady = connected && !disconnecting
+  const workspaceInteractive = workspaceReady && !paletteOpen
+  const menuScope = workspaceInteractive ? registerMenuAction : null
+  const canRun = workspaceInteractive && !queryRunning && activeTab.kind === 'query'
+  const canDisconnect = workspaceInteractive && !queryRunning
+  const workspaceCommands: Partial<Record<MenuCommand, () => void>> = {
+    connect: !connected ? () => document.querySelector<HTMLSelectElement>('.connect-dialog select')?.focus() : undefined,
+    disconnect: canDisconnect ? () => void disconnect() : undefined,
+    'new-query': workspaceInteractive ? () => newQueryTab() : undefined,
+    'close-tab': workspaceInteractive && activeTab.id !== FIRST_QUERY.id &&
+      !(activeTab.kind === 'query' && activeTab.run.status === 'running') ? () => closeTab(activeTab.id) : undefined,
+    'refresh-schema': workspaceInteractive ? () => void refreshSchema() : undefined,
+    'run-query': canRun ? () => void execute(activeTab.id) : undefined,
+    'cancel-query': queryRunning ? () => void window.api.cancel() : undefined,
+    'find-table': workspaceReady ? () => {
+      if (paletteOpen) closePalette()
+      else {
+        focusBeforePalette.current = document.activeElement
+        setPaletteOpen(true)
+      }
+    } : undefined,
+    'toggle-inspector': workspaceInteractive ? () => setInspectorOpen((open) => !open) : undefined
+  }
+
+  const menuDispatch = useRef<(command: MenuCommand) => void>(() => {})
+  menuDispatch.current = (command) => {
+    const run = workspaceCommands[command]
+    if (run) run()
+    else if (workspaceInteractive) scopedActions.current.get(command)?.(command)
+  }
+  useEffect(() => window.api.onMenuCommand((command) => menuDispatch.current(command)), [])
+
+  const sentMenuAvailability = useRef('')
+  useEffect(() => {
+    const commands = (Object.keys(workspaceCommands) as MenuCommand[]).filter((command) => workspaceCommands[command])
+    if (workspaceInteractive) commands.push(...scopedCommands)
+    const signature = commands.join(',')
+    if (sentMenuAvailability.current === signature) return
+    sentMenuAvailability.current = signature
+    window.api.setMenuAvailability(commands)
+  })
+
   return (
     <InspectorContext.Provider value={inspectorApi}>
       <div className={`app ${inspectorOpen ? 'with-inspector' : ''}`} data-connection-color={conn?.color}>
@@ -391,7 +493,7 @@ export function App(): JSX.Element {
           <button
             className="primary"
             onClick={() => void execute(activeTab.id)}
-            disabled={!conn || disconnecting || activeTab.kind !== 'query' || queryRunning}
+            disabled={!canRun}
             title="Ctrl+Enter"
           >
             ▶ Run
@@ -401,31 +503,26 @@ export function App(): JSX.Element {
           </button>
           <div className="spacer" />
           <button
+            aria-pressed={inspectorOpen}
             className={inspectorOpen ? 'active-toggle' : ''}
             onClick={() => setInspectorOpen((o) => !o)}
             title="Show the selected cell's value in a side panel (Ctrl+I)"
           >
-            ◧ Value
+            ◧ Inspector
           </button>
-          {conn && (
-            <>
-              <span className="conn-label">
-                {conn.label} · {currentDb ?? 'no schema'} · {DRIVER_LABELS[conn.info.driver]} {conn.info.serverVersion}
-              </span>
-              <button onClick={disconnect} disabled={queryRunning || disconnecting}>Disconnect</button>
-            </>
-          )}
         </header>
 
-        <aside className="sidebar">
+        <aside className="sidebar" aria-label="Database explorer">
           <SchemaTree
             key={conn?.label ?? 'none'}
+            activeTable={activeTab.kind === 'table' ? activeTab : undefined}
             schemas={schemas}
             currentDb={currentDb}
             onUseDatabase={conn?.info.capabilities.switchSchema ? useSchema : undefined}
             onInsert={insertText}
             onOpenTable={openTable}
-            onRefresh={refreshSchema}
+            onRefresh={workspaceInteractive ? refreshSchema : undefined}
+            onDisconnect={canDisconnect ? disconnect : undefined}
           />
         </aside>
 
@@ -497,38 +594,54 @@ export function App(): JSX.Element {
 
           {/* Keep buffers, results, filters and pages mounted while switching tabs. */}
           {tabs.map((t) => t.kind === 'query' && (
-            <div key={t.id} className="tab-panel query-panel" hidden={t.id !== activeId}>
-              <section className="editor">
+            <QuerySplit
+              key={t.id}
+              hidden={t.id !== activeId}
+              share={t.split ?? 45}
+              onResize={(split) => setTabs((ts) => ts.map((tab) =>
+                tab.kind === 'query' && tab.id === t.id ? { ...tab, split } : tab
+              ))}
+              editor={
                 <SqlEditor
-                  primary={t.id === FIRST_QUERY.id}
-                  initialSql={t.initialSql}
+                  initialSql={t.sql}
+                  selectOnMount={t.selectOnMount}
+                  onChange={(sql) => setTabs((ts) => ts.map((tab) =>
+                    tab.kind === 'query' && tab.id === t.id ? { ...tab, sql } : tab
+                  ))}
                   onMount={(editor) => editors.current.set(t.id, editor)}
                   onRun={() => void execute(t.id)}
                 />
-              </section>
-              <section className="results">
-                <ResultsPanel run={t.run} label={`Query ${t.number}`} />
-              </section>
-            </div>
+              }
+              results={
+                <MenuActionsContext.Provider value={t.id === activeId ? menuScope : null}>
+                  <ResultsPanel run={t.run} label={`Query ${t.number}`} />
+                </MenuActionsContext.Provider>
+              }
+            />
           ))}
           {tabs.map(
             (t) =>
               t.kind === 'table' && (
                 <div key={t.id} className="tab-panel" hidden={t.id !== activeId}>
-                  <TableView
-                    sqlite={conn?.info.driver === 'sqlite'}
-                    schema={t.schema}
-                    table={t.table}
-                    view={t.view}
-                    onViewChange={(v) => setTableView(t.id, v)}
-                    onOpenSql={openInEditor}
-                    initialFilters={t.filters}
-                    onOpenReference={openReference}
-                    onDirtyChange={(dirty) => {
-                      if (dirty) dirtyTabs.current.add(t.id)
-                      else dirtyTabs.current.delete(t.id)
-                    }}
-                  />
+                  <MenuActionsContext.Provider value={t.id === activeId ? menuScope : null}>
+                    <TableView
+                      sqlite={conn?.info.driver === 'sqlite'}
+                      schema={t.schema}
+                      table={t.table}
+                      view={t.view}
+                      onViewChange={(v) => setTableView(t.id, v)}
+                      onOpenSql={openInEditor}
+                      initialFilter={t.applied ?? (t.filters ? { filters: t.filters, match: 'all' } : undefined)}
+                      onFilterApply={(applied) => setTabs((ts) => ts.map((tab) =>
+                        tab.kind === 'table' && tab.id === t.id ? { ...tab, applied } : tab
+                      ))}
+                      onOpenReference={openReference}
+                      onDirtyChange={(dirty) => {
+                        if (dirty) dirtyTabs.current.add(t.id)
+                        else dirtyTabs.current.delete(t.id)
+                      }}
+                    />
+                  </MenuActionsContext.Provider>
                 </div>
               )
           )}
@@ -539,7 +652,18 @@ export function App(): JSX.Element {
         )}
 
         <footer className="statusbar">
-          {activeTab.kind === 'query' ? <StatusText run={activeTab.run} /> : <span>{activeTab.schema}.{activeTab.table}</span>}
+          <div className="workspace-status">
+            {activeTab.kind === 'query' ? <StatusText run={activeTab.run} /> : <span>{activeTab.schema}.{activeTab.table}</span>}
+          </div>
+          {conn ? (
+            <div className="conn-label" title={`${conn.label} · ${currentDb ?? 'No schema'} · ${DRIVER_LABELS[conn.info.driver]} ${conn.info.serverVersion}`}>
+              <strong>{conn.label}</strong>
+              <span className="conn-schema">{currentDb ?? 'No schema'}</span>
+              <span className="conn-version">{DRIVER_LABELS[conn.info.driver]} {conn.info.serverVersion}</span>
+            </div>
+          ) : (
+            <span>Disconnected</span>
+          )}
         </footer>
 
         {!conn && <ConnectDialog onConnected={onConnected} />}
@@ -574,6 +698,7 @@ function ResultsPanel({ run, label }: { run: RunState; label: string }): JSX.Ele
         return (
           <div className="query-results">
             <div className="query-results-actions">
+              <h2 className="pane-heading">Results</h2>
               <ExportRows fields={fields} rows={rows} name={label} />
             </div>
             <div className="table-body">

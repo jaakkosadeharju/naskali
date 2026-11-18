@@ -10,10 +10,11 @@ import {
   type ServerConnectionConfig,
   type SqliteConnectionConfig
 } from '../../../shared/types'
+import { removeWorkspace } from '../workspaceStore'
 import logo from '../assets/logo.png'
 
 interface Props {
-  onConnected: (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor) => void
+  onConnected: (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor, profileId: string | null) => void
 }
 
 const DRIVERS: DriverKind[] = ['mysql', 'postgres', 'mssql', 'sqlite']
@@ -30,6 +31,14 @@ const DATABASE_LABEL: Record<ServerConnectionConfig['driver'], { label: string; 
   mysql: { label: 'Default database', hint: '(optional)' },
   postgres: { label: 'Database', hint: '(defaults to the user name)' },
   mssql: { label: 'Database', hint: "(optional; the login's default otherwise)" }
+}
+
+function sameTarget(a: ConnectionConfig, b: ConnectionConfig): boolean {
+  if (a.driver !== b.driver) return false
+  if (a.driver === 'sqlite' || b.driver === 'sqlite') {
+    return a.driver === 'sqlite' && b.driver === 'sqlite' && a.file === b.file
+  }
+  return a.host === b.host && a.port === b.port && a.user === b.user && (a.database ?? '') === (b.database ?? '')
 }
 
 export function ConnectDialog({ onConnected }: Props): JSX.Element {
@@ -120,8 +129,10 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
     setTestPassed(false)
     const r = await window.api.connect(cfg)
     setBusy(null)
-    if (r.ok) onConnected(cfg, r.value, color)
-    else setError(r.error)
+    if (r.ok) {
+      const profile = saved.find((connection) => connection.id === selectedId)
+      onConnected(cfg, r.value, color, profile && sameTarget(profile.config, cfg) ? profile.id : null)
+    } else setError(r.error)
   }
 
   async function remove(): Promise<void> {
@@ -132,6 +143,7 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
     const r = await window.api.deleteConnection(selectedId)
     setBusy(null)
     if (r.ok) {
+      removeWorkspace(selectedId)
       setSaved(r.value)
       selectConnection()
     } else {

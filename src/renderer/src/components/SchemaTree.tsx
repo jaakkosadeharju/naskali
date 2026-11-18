@@ -3,16 +3,18 @@ import type { SchemaInfo } from '../../../shared/types'
 import { MOD } from './TablePalette'
 
 interface Props {
+  activeTable?: { schema: string; table: string }
   schemas: SchemaInfo[]
   currentDb: string | null
   /** Absent when the database can't switch schemas. */
   onUseDatabase?: (name: string) => void
   onInsert: (text: string) => void
   onOpenTable: (schema: string, table: string, view: 'data' | 'schema') => void
-  onRefresh: () => void
+  onRefresh?: () => void
+  onDisconnect?: () => void
 }
 
-export function SchemaTree({ schemas, currentDb, onUseDatabase, onInsert, onOpenTable, onRefresh }: Props): JSX.Element {
+export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onInsert, onOpenTable, onRefresh, onDisconnect }: Props): JSX.Element {
   const [open, setOpen] = useState<Set<string>>(() => new Set(currentDb ? [currentDb] : []))
   const [filter, setFilter] = useState('')
   const toggle = (key: string): void =>
@@ -26,11 +28,23 @@ export function SchemaTree({ schemas, currentDb, onUseDatabase, onInsert, onOpen
 
   return (
     <div className="schema-tree">
-      <div className="tree-header">
-        <input placeholder={`Filter (${MOD}P: open table)`} value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <button title="Refresh schema" onClick={onRefresh}>
-          ⟳
-        </button>
+      <div className="tree-heading">
+        <h2 className="pane-heading">Database explorer</h2>
+        <div className="tree-actions">
+          <button type="button" title="Refresh schema" aria-label="Refresh schema" onClick={onRefresh} disabled={!onRefresh}>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M13 6a5 5 0 1 0-.4 5M13 2.5V6H9.5" />
+            </svg>
+          </button>
+          <button type="button" title="Disconnect" aria-label="Disconnect" onClick={onDisconnect} disabled={!onDisconnect}>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M7 2.5H3.5v11H7M6 8h7m-2.5-2.5L13 8l-2.5 2.5" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div className="tree-filter">
+        <input aria-label="Filter tables" placeholder={`Filter (${MOD}P: open table)`} value={filter} onChange={(e) => setFilter(e.target.value)} />
       </div>
       <ul>
         {schemas.map((s) => {
@@ -54,7 +68,7 @@ export function SchemaTree({ schemas, currentDb, onUseDatabase, onInsert, onOpen
                     return (
                       <li key={key}>
                         <div
-                          className="node table-node"
+                          className={`node table-node${activeTable?.schema === s.name && activeTable.table === t.name ? ' selected' : ''}`}
                           onDoubleClick={() => onOpenTable(s.name, t.name, 'data')}
                           title="Double-click to open data"
                         >

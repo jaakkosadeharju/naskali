@@ -39,7 +39,10 @@ npm run dev          # app with hot reload
 
 ## Features
 
+- The native menu bar groups file, editing, connection, query, view, and help commands. Export and copy commands follow the active tab.
+
 - **New query** opens another SQL tab with its own draft and results. Query tabs share the active database session and run one statement at a time.
+- Saved connections restore their open tabs, tab order, SQL drafts, editor splits, and applied table filters. New connections start with an example query.
 - Drag query and table tabs to reorder them, or focus a tab and press **Alt+Shift+Left/Right**.
 - **Ctrl+Enter** runs the selection, or the statement under the cursor (quote/comment-aware `;` splitting)
 - Cancel a running query (MySQL `KILL QUERY`, PostgreSQL `pg_cancel_backend`, SQL Server request cancel, SQLite: the
