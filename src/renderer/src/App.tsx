@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { monaco } from './monacoSetup'
 import { completionState } from './completion'
 import { ConnectDialog } from './components/ConnectDialog'
@@ -6,13 +6,12 @@ import { TableDesigner, type DesignerRequest } from './components/TableDesigner'
 import { SchemaTree } from './components/SchemaTree'
 import { QuerySplit } from './components/QuerySplit'
 import { SqlEditor, sqlToRun } from './components/SqlEditor'
-import { ExportRows } from './components/ExportRows'
-import { ResultsGrid } from './components/ResultsGrid'
+import { QueryResultsView } from './components/QueryResultsView'
 import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
 import { TablePalette } from './components/TablePalette'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
-import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type QueryResultSet, type RowFilter, type SchemaInfo, type TableAction } from '../../shared/types'
+import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo, type TableAction } from '../../shared/types'
 import { setEditorDialect } from './monacoSetup'
 import type { MenuCommand } from '../../shared/menuCommands'
 import { MenuActionsContext, type RegisterMenuAction } from './menuActions'
@@ -39,8 +38,11 @@ function connectionLabel(cfg: ConnectionConfig, info: ConnectionInfo): string {
 type RunState =
   | { status: 'idle' }
   | { status: 'running'; sql: string; startedAt: number }
-  | { status: 'done'; sql: string; result: QueryResult }
+  /** `id` tells runs apart (a new one resets staged edits); `notice` is shown with the result. */
+  | { status: 'done'; sql: string; result: QueryResult; id: number; notice?: string }
   | { status: 'error'; sql: string; error: string }
+
+let runCounter = 0
 
 type QueryTab = Extract<WorkspaceTab, { kind: 'query' }> & { run: RunState; selectOnMount?: boolean }
 type Tab = QueryTab | Extract<WorkspaceTab, { kind: 'table' }>
@@ -239,7 +241,7 @@ export function App(): JSX.Element {
 
   const disconnect = async (): Promise<void> => {
     if (runningQuery.current || disconnecting) return
-    if (dirtyTabs.current.size > 0 && !window.confirm('Some tables have unsaved changes. Discard them and disconnect?')) return
+    if (dirtyTabs.current.size > 0 && !window.confirm('Some tabs have unsaved changes. Discard them and disconnect?')) return
     setDisconnecting(true)
     await window.api.disconnect()
     connectionGeneration.current++
@@ -257,12 +259,21 @@ export function App(): JSX.Element {
     setDisconnecting(false)
   }
 
-  const execute = async (id: string): Promise<void> => {
-    const editor = editors.current.get(id)
-    if (!conn || disconnecting || designer || !editor || runningQuery.current) return
-    const sql = sqlToRun(editor)
-    if (!sql) return
+  const sessionIdle = (): boolean => !!conn && !disconnecting && !designer && !runningQuery.current
 
+  const execute = (id: string): void => {
+    const editor = editors.current.get(id)
+    if (!sessionIdle()) return
+    const sql = editor && sqlToRun(editor)
+    if (!sql) return
+    if (dirtyTabs.current.has(id) && !window.confirm('Discard unsaved changes to the results?')) return
+    void runSql(id, sql)
+  }
+
+  /** Runs `sql` in query tab `id`; `notice` is shown with its result (e.g. after saving edits). */
+  const runSql = async (id: string, sql: string, notice?: string): Promise<void> => {
+    if (!sessionIdle()) return
+    dirtyTabs.current.delete(id)
     const setRun = (run: RunState): void => {
       setTabs((ts) => ts.map((t) => t.kind === 'query' && t.id === id ? { ...t, run } : t))
     }
@@ -274,7 +285,7 @@ export function App(): JSX.Element {
         setRun({ status: 'error', sql, error: r.error })
         return
       }
-      setRun({ status: 'done', sql, result: r.value.result })
+      setRun({ status: 'done', sql, result: r.value.result, id: ++runCounter, notice })
       updateDb(r.value.schema)
       // DDL changes the schema; keep the tree and autocomplete in sync.
       if (/^\s*(create|alter|drop|rename|truncate)\b/i.test(sql)) void refreshSchema()
@@ -354,7 +365,8 @@ export function App(): JSX.Element {
     const idx = tabs.findIndex((t) => t.id === id)
     const tab = tabs[idx]
     if (!tab) return
-    if (dirtyTabs.current.has(id) && tab.kind === 'table' && !window.confirm(`Discard unsaved changes to ${tab.table}?`)) return
+    const name = tab.kind === 'table' ? tab.table : `Query ${tab.number} results`
+    if (dirtyTabs.current.has(id) && !window.confirm(`Discard unsaved changes to ${name}?`)) return
     dirtyTabs.current.delete(id)
     editors.current.delete(id)
     const next = tabs.filter((t) => t.id !== id)
@@ -665,12 +677,21 @@ export function App(): JSX.Element {
                     tab.kind === 'query' && tab.id === t.id ? { ...tab, sql } : tab
                   ))}
                   onMount={(editor) => editors.current.set(t.id, editor)}
-                  onRun={() => void execute(t.id)}
+                  onRun={() => execute(t.id)}
                 />
               }
               results={
                 <MenuActionsContext.Provider value={t.id === activeId ? menuScope : null}>
-                  <ResultsPanel run={t.run} label={`Query ${t.number}`} />
+                  <ResultsPanel
+                    run={t.run}
+                    label={`Query ${t.number}`}
+                    onRerun={(sql, notice) => void runSql(t.id, sql, notice)}
+                    onDirtyChange={(dirty) => {
+                      if (dirty) dirtyTabs.current.add(t.id)
+                      else dirtyTabs.current.delete(t.id)
+                    }}
+                    onOpenSql={openInEditor}
+                  />
                 </MenuActionsContext.Provider>
               }
             />
@@ -745,7 +766,15 @@ export function App(): JSX.Element {
   )
 }
 
-function ResultsPanel({ run, label }: { run: RunState; label: string }): JSX.Element {
+interface ResultsPanelProps {
+  run: RunState
+  label: string
+  onRerun: (sql: string, notice: string) => void
+  onDirtyChange: (dirty: boolean) => void
+  onOpenSql: (sql: string) => void
+}
+
+function ResultsPanel({ run, label, onRerun, onDirtyChange, onOpenSql }: ResultsPanelProps): JSX.Element {
   switch (run.status) {
     case 'idle':
       return <div className="placeholder">Run a query with Ctrl+Enter</div>
@@ -755,7 +784,18 @@ function ResultsPanel({ run, label }: { run: RunState; label: string }): JSX.Ele
       return <pre className="error-panel">{run.error}</pre>
     case 'done':
       if (run.result.kind === 'rows') {
-        return <QueryResults sets={[run.result, ...(run.result.additionalResults ?? [])]} label={label} />
+        return (
+          <QueryResultsView
+            key={run.id}
+            sets={[run.result, ...(run.result.additionalResults ?? [])]}
+            sql={run.sql}
+            label={label}
+            notice={run.notice}
+            onRerun={(notice) => onRerun(run.sql, notice)}
+            onDirtyChange={onDirtyChange}
+            onOpenSql={onOpenSql}
+          />
+        )
       }
       return (
         <div className="placeholder">
@@ -765,68 +805,6 @@ function ResultsPanel({ run, label }: { run: RunState; label: string }): JSX.Ele
         </div>
       )
   }
-}
-
-function QueryResults({ sets, label }: { sets: QueryResultSet[]; label: string }): JSX.Element {
-  const [selected, setSelected] = useState(0)
-  const id = useId()
-  const multiple = sets.length > 1
-  const { fields, rows, rowCount, truncated } = sets[selected]
-  const source = multiple ? `${label} - Result ${selected + 1}` : label
-
-  return (
-    <div className="query-results">
-      <div className="query-results-actions">
-        {multiple ? (
-          <div className="result-set-tabs" role="tablist" aria-label="Result sets">
-            {sets.map((_, index) => (
-              <button
-                key={index}
-                id={`${id}-tab-${index}`}
-                type="button"
-                role="tab"
-                aria-selected={selected === index}
-                aria-controls={`${id}-panel`}
-                tabIndex={selected === index ? 0 : -1}
-                onClick={() => setSelected(index)}
-                onKeyDown={(event) => {
-                  let next: number
-                  switch (event.key) {
-                    case 'ArrowRight':
-                      next = (index + 1) % sets.length
-                      break
-                    case 'ArrowLeft':
-                      next = (index + sets.length - 1) % sets.length
-                      break
-                    case 'Home':
-                      next = 0
-                      break
-                    case 'End':
-                      next = sets.length - 1
-                      break
-                    default: return
-                  }
-                  event.preventDefault()
-                  setSelected(next)
-                  document.getElementById(`${id}-tab-${next}`)?.focus()
-                }}
-              >
-                Result {index + 1}
-              </button>
-            ))}
-          </div>
-        ) : <h2 className="pane-heading">Results</h2>}
-        {multiple && <span className={truncated ? 'warn' : 'muted'}>
-          {truncated ? `Showing ${rows.length.toLocaleString()} of ${rowCount?.toLocaleString()} rows` : `${rows.length.toLocaleString()} rows`}
-        </span>}
-        <ExportRows fields={fields} rows={rows} name={source} />
-      </div>
-      <div className="table-body" id={multiple ? `${id}-panel` : undefined}
-        role={multiple ? 'tabpanel' : undefined} aria-labelledby={multiple ? `${id}-tab-${selected}` : undefined}>
-        <ResultsGrid key={selected} fields={fields} rows={rows} sourceLabel={source} />
-      </div>
-    </div>
-  )
 }
 
 function StatusText({ run }: { run: RunState }): JSX.Element {
