@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SPLIT_RULES, isPlainSelect, splitStatements, statementAt } from '../sqlSplit'
+import { SPLIT_RULES, isPlainSelect, splitStatements, sqlTokens, statementAt } from '../sqlSplit'
 
 const texts = (sql: string, rules = SPLIT_RULES.mysql): string[] => splitStatements(sql, rules).map((s) => s.text)
 
@@ -79,5 +79,22 @@ describe('isPlainSelect', () => {
     expect(isPlainSelect("SELECT 'delete from t' AS s, `update` FROM t # insert", SPLIT_RULES.mysql)).toBe(true)
     expect(isPlainSelect('SELECT "delete", $$ update $$ FROM t /* into */', SPLIT_RULES.postgres)).toBe(true)
     expect(isPlainSelect('SELECT [merge], N\'exec\' FROM t -- call', SPLIT_RULES.mssql)).toBe(true)
+  })
+})
+
+describe('sqlTokens', () => {
+  const tokens = (sql: string, rules = SPLIT_RULES.mysql): string[] => sqlTokens(sql, rules).map((t) => `${t.kind}:${t.text}`)
+
+  it('splits code into words and symbols, skipping comments', () => {
+    expect(tokens('SELECT c.id, 1.5 FROM shop.customers c -- note\nWHERE /* x */ id>=2')).toEqual([
+      'word:SELECT', 'word:c', 'symbol:.', 'word:id', 'symbol:,', 'word:1', 'symbol:.', 'word:5', 'word:FROM', 'word:shop', 'symbol:.',
+      'word:customers', 'word:c', 'word:WHERE', 'word:id', 'symbol:>', 'symbol:=', 'word:2'
+    ])
+  })
+
+  it('unquotes identifiers and keeps strings whole', () => {
+    expect(tokens("SELECT `a``b`, 'it''s' FROM t # c")).toEqual(['word:SELECT', 'identifier:a`b', 'symbol:,', "string:'it''s'", 'word:FROM', 'word:t'])
+    expect(tokens('SELECT "x""y", $$ a $$ FROM "T"', SPLIT_RULES.postgres)).toEqual(['word:SELECT', 'identifier:x"y', 'symbol:,', 'string:$$ a $$', 'word:FROM', 'identifier:T'])
+    expect(tokens('SELECT [a]]b] FROM [dbo].[t]', SPLIT_RULES.mssql)).toEqual(['word:SELECT', 'identifier:a]b', 'word:FROM', 'identifier:dbo', 'symbol:.', 'identifier:t'])
   })
 })

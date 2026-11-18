@@ -29,44 +29,96 @@ export const SPLIT_RULES: Record<DriverKind, SplitRules> = {
 
 const DOLLAR_TAG = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/
 
-/**
- * The SQL with every quoted string/identifier replaced by `_` and every comment
- * by spaces, keeping offsets: what is left is code a keyword search can trust.
- */
-export function maskSql(sql: string, rules: SplitRules = SPLIT_RULES.mysql): string {
-  let out = ''
+interface Segment {
+  kind: 'code' | 'quoted' | 'comment'
+  start: number
+  end: number
+}
+
+/** Index just past a quoted run opened at `i`; a doubled closing quote ('' or ]]) escapes it. */
+function quotedEnd(sql: string, i: number, close: string, backslashEscapes: boolean): number {
+  let j = i + 1
+  for (;;) {
+    while (j < sql.length && sql[j] !== close) {
+      if (backslashEscapes && sql[j] === '\\') j++
+      j++
+    }
+    if (j >= sql.length) return sql.length
+    if (sql[j + 1] !== close) return j + 1
+    j += 2
+  }
+}
+
+/** Cuts SQL into code, quoted strings/identifiers and comments. */
+function lex(sql: string, rules: SplitRules): Segment[] {
+  const out: Segment[] = []
+  let codeStart = 0
   let i = 0
-  const skip = (end: number, fill: string): void => {
-    out += fill.repeat(end - i)
-    i = end
+  const take = (kind: Segment['kind'], end: number): void => {
+    if (codeStart < i) out.push({ kind: 'code', start: codeStart, end: i })
+    out.push({ kind, start: i, end })
+    i = codeStart = end
   }
   while (i < sql.length) {
     const ch = sql[i]
     const next = sql[i + 1]
     if (ch === "'" || ch === '"' || ch === '`') {
-      let j = i + 1
-      while (j < sql.length && sql[j] !== ch) {
-        if (rules.backslashEscapes && sql[j] === '\\' && ch !== '`') j++
-        j++
-      }
-      // A doubled quote ('') simply closes and reopens.
-      skip(Math.min(j + 1, sql.length), '_')
+      take('quoted', quotedEnd(sql, i, ch, rules.backslashEscapes && ch !== '`'))
     } else if (rules.brackets && ch === '[') {
-      const close = sql.indexOf(']', i + 1)
-      skip(close === -1 ? sql.length : close + 1, '_')
+      take('quoted', quotedEnd(sql, i, ']', false))
     } else if (rules.dollarQuotes && ch === '$' && DOLLAR_TAG.test(sql.slice(i, i + 64))) {
       const tag = DOLLAR_TAG.exec(sql.slice(i, i + 64))![0]
       const close = sql.indexOf(tag, i + tag.length)
-      skip(close === -1 ? sql.length : close + tag.length, '_')
+      take('quoted', close === -1 ? sql.length : close + tag.length)
     } else if ((ch === '-' && next === '-' && (!rules.dashDashNeedsSpace || /\s/.test(sql[i + 2] ?? ' '))) || (rules.hashComments && ch === '#')) {
       const close = sql.indexOf('\n', i)
-      skip(close === -1 ? sql.length : close, ' ')
+      take('comment', close === -1 ? sql.length : close)
     } else if (ch === '/' && next === '*') {
       const close = sql.indexOf('*/', i + 2)
-      skip(close === -1 ? sql.length : close + 2, ' ')
+      take('comment', close === -1 ? sql.length : close + 2)
     } else {
-      out += ch
       i++
+    }
+  }
+  if (codeStart < sql.length) out.push({ kind: 'code', start: codeStart, end: sql.length })
+  return out
+}
+
+/**
+ * The SQL with every quoted string/identifier replaced by `_` and every comment
+ * by spaces, keeping offsets: what is left is code a keyword search can trust.
+ */
+export function maskSql(sql: string, rules: SplitRules = SPLIT_RULES.mysql): string {
+  return lex(sql, rules)
+    .map((s) => (s.kind === 'code' ? sql.slice(s.start, s.end) : (s.kind === 'quoted' ? '_' : ' ').repeat(s.end - s.start)))
+    .join('')
+}
+
+export interface SqlToken {
+  /** `identifier` is a quoted name, unquoted; `string` keeps its quotes. */
+  kind: 'word' | 'identifier' | 'string' | 'symbol'
+  text: string
+}
+
+const CODE_TOKEN = /[\p{L}\p{N}_$@#]+|\S/gu
+
+function unquote(raw: string): string {
+  const close = raw[0] === '[' ? ']' : raw[0]
+  const inner = raw.length > 1 && raw.endsWith(close) ? raw.slice(1, -1) : raw.slice(1)
+  return inner.split(close + close).join(close)
+}
+
+/** The SQL's words, quoted names, strings and symbols, without whitespace and comments. */
+export function sqlTokens(sql: string, rules: SplitRules = SPLIT_RULES.mysql): SqlToken[] {
+  const out: SqlToken[] = []
+  for (const s of lex(sql, rules)) {
+    const text = sql.slice(s.start, s.end)
+    if (s.kind === 'quoted') {
+      // MySQL's default "…" strings are taken as names too; only names matter to callers.
+      if (text[0] === '"' || text[0] === '`' || text[0] === '[') out.push({ kind: 'identifier', text: unquote(text) })
+      else out.push({ kind: 'string', text })
+    } else if (s.kind === 'code') {
+      for (const [m] of text.matchAll(CODE_TOKEN)) out.push({ kind: m.length > 1 || /[\p{L}\p{N}_$@#]/u.test(m) ? 'word' : 'symbol', text: m })
     }
   }
   return out

@@ -108,10 +108,50 @@ describe('resultEditInfo', () => {
     expect(info.readOnly).toEqual({ 2: 'Read-only: include id to edit customers' })
   })
 
-  it('refuses a table that appears more than once', async () => {
-    const info = await resultEditInfo(driver, 'SELECT a.id, b.id FROM customers a JOIN customers b', [field('id', 'customers.id'), field('id', 'customers.id')])
+  it('refuses a column that appears more than once', async () => {
+    const info = await resultEditInfo(driver, 'SELECT id, name, id FROM customers', [field('id', 'customers.id'), field('name', 'customers.name'), field('id', 'customers.id')])
     expect(info.tables).toEqual([])
     expect(info.reason).toBe('Read-only: customers appears more than once in the result')
+  })
+
+  it('refuses a table the query reads more than once, whichever columns come from each', async () => {
+    const info = await resultEditInfo(driver, 'SELECT a.id, a.name, b.email, o.id FROM customers a JOIN customers b ON b.id = a.id + 1 JOIN orders o ON o.customer_id = a.id', [
+      field('id', 'customers.id'),
+      field('name', 'customers.name'),
+      field('email', 'customers.email'),
+      field('id', 'orders.id')
+    ])
+    expect(info.tables.map((t) => t.table)).toEqual(['orders'])
+    const reason = 'Read-only: customers is read more than once in the query'
+    expect(info.readOnly).toEqual({ 0: reason, 1: reason, 2: reason })
+  })
+
+  it('refuses a table reached only through a view', async () => {
+    // e.g. SQLite and SQL Server report the base table behind a view's columns.
+    const info = await resultEditInfo(driver, 'SELECT id, name FROM customer_view', [field('id', 'customers.id'), field('name', 'customers.name')])
+    expect(info.reason).toBe('Read-only: the query reads customers through a view')
+  })
+
+  it('refuses results of set operations', async () => {
+    // SQLite reports the leftmost SELECT's table for every row of a UNION.
+    const info = await resultEditInfo(driver, 'SELECT id, name FROM customers UNION ALL SELECT id, name FROM products', [
+      field('id', 'customers.id'),
+      field('name', 'customers.name')
+    ])
+    expect(info).toEqual({ tables: [], readOnly: {}, reason: 'Read-only: results of UNION, INTERSECT or EXCEPT cannot be edited' })
+  })
+
+  it('refuses a common table expression used more than once', async () => {
+    const info = await resultEditInfo(driver, 'WITH c AS (SELECT * FROM customers) SELECT a.id, b.email FROM c a JOIN c b ON b.id = a.id + 1', [
+      field('id', 'customers.id'),
+      field('email', 'customers.email')
+    ])
+    expect(info).toEqual({ tables: [], readOnly: {}, reason: 'Read-only: c is used more than once in the query' })
+  })
+
+  it('edits a table read once through a common table expression', async () => {
+    const info = await resultEditInfo(driver, 'WITH c AS (SELECT * FROM customers) SELECT id, name FROM c', [field('id', 'customers.id'), field('name', 'customers.name')])
+    expect(info.tables.map((t) => t.table)).toEqual(['customers'])
   })
 
   it('applies the table view rules', async () => {
