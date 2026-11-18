@@ -22,7 +22,12 @@ Use strict TypeScript, two-space indentation, single quotes, and semicolon-free 
 
 ## Testing
 
-Run `npm run typecheck` and `npm run build` before submitting. The repository currently has no automated test runner, test naming convention, or coverage threshold. Smoke-test affected workflows with `npm run dev` and the seeded database. For table editing changes, verify that successful edits persist and failed batches roll back.
+Run `npm test`, `npm run typecheck` and `npm run build` before submitting. Tests use Vitest and sit next to the code they cover:
+
+- `*.test.ts` files are unit tests. `npm test` runs them, and they need no database. Use a fake `Driver` for main-process logic.
+- `*.db.test.ts` files are integration tests against the seeded databases. Run `npm run db:up` first, then `npm run test:db`. Tests that change rows must restore them.
+
+Add new logic test-first where practical. There is no coverage threshold. Smoke-test affected workflows with `npm run dev` and the seeded database. For table editing changes, verify that successful edits persist and failed batches roll back.
 
 ## Commits and Pull Requests
 
