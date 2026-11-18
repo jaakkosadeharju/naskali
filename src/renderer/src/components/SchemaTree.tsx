@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { SchemaInfo } from '../../../shared/types'
 import { MOD } from './TablePalette'
 
@@ -10,13 +10,19 @@ interface Props {
   onUseDatabase?: (name: string) => void
   onInsert: (text: string) => void
   onOpenTable: (schema: string, table: string, view: 'data' | 'schema') => void
+  onNewTable?: (schema?: string) => void
+  onContextMenu?: (schema: string, table?: string) => void
   onRefresh?: () => void
   onDisconnect?: () => void
 }
 
-export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onInsert, onOpenTable, onRefresh, onDisconnect }: Props): JSX.Element {
+export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onInsert, onOpenTable, onNewTable, onContextMenu, onRefresh, onDisconnect }: Props): JSX.Element {
   const [open, setOpen] = useState<Set<string>>(() => new Set(currentDb ? [currentDb] : []))
   const [filter, setFilter] = useState('')
+  const activeSchema = activeTable?.schema
+  useEffect(() => {
+    if (activeSchema) setOpen((current) => current.has(activeSchema) ? current : new Set(current).add(activeSchema))
+  }, [activeSchema])
   const toggle = (key: string): void =>
     setOpen((s) => {
       const n = new Set(s)
@@ -31,6 +37,11 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
       <div className="tree-heading">
         <h2 className="pane-heading">Database explorer</h2>
         <div className="tree-actions">
+          <button type="button" title="New table" aria-label="New table" onClick={() => onNewTable?.()} disabled={!onNewTable}>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinecap="round" aria-hidden="true">
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+          </button>
           <button type="button" title="Refresh schema" aria-label="Refresh schema" onClick={onRefresh} disabled={!onRefresh}>
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M13 6a5 5 0 1 0-.4 5M13 2.5V6H9.5" />
@@ -55,6 +66,11 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
             <li key={s.name}>
               <div
                 className={`node schema ${s.name === currentDb ? 'current' : ''}`}
+                tabIndex={onContextMenu ? 0 : undefined}
+                onContextMenu={onContextMenu ? (event) => {
+                  event.preventDefault()
+                  onContextMenu(s.name)
+                } : undefined}
                 onClick={() => toggle(s.name)}
                 onDoubleClick={() => onUseDatabase?.(s.name)}
                 title={onUseDatabase ? 'Double-click to make this the current schema' : undefined}
@@ -69,6 +85,11 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
                       <li key={key}>
                         <div
                           className={`node table-node${activeTable?.schema === s.name && activeTable.table === t.name ? ' selected' : ''}`}
+                          tabIndex={onContextMenu && t.type === 'BASE TABLE' ? 0 : undefined}
+                          onContextMenu={onContextMenu && t.type === 'BASE TABLE' ? (event) => {
+                            event.preventDefault()
+                            onContextMenu(s.name, t.name)
+                          } : undefined}
                           onDoubleClick={() => onOpenTable(s.name, t.name, 'data')}
                           title="Double-click to open data"
                         >

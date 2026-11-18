@@ -18,6 +18,7 @@ interface Props {
   table: string
   view: TableViewMode
   onViewChange: (v: TableViewMode) => void
+  onEditSchema?: () => void
   onOpenSql: (sql: string) => void
   /** Reports whether this tab has unsaved edits (so closing it can ask first). */
   onDirtyChange: (dirty: boolean) => void
@@ -54,7 +55,7 @@ const sameValue = (a: CellValue, b: CellValue): boolean =>
 
 const strip = (fs: DraftFilter[]): RowFilter[] => fs.map(({ id, ...filter }) => filter)
 
-export function TableView({ sqlite, schema, table, view, onViewChange, onOpenSql, onDirtyChange, initialFilter, onFilterApply, onOpenReference }: Props): JSX.Element {
+export function TableView({ sqlite, schema, table, view, onViewChange, onEditSchema, onOpenSql, onDirtyChange, initialFilter, onFilterApply, onOpenReference }: Props): JSX.Element {
   const [details, setDetails] = useState<TableDetails | null>(null)
   const [detailsError, setDetailsError] = useState<string | null>(null)
 
@@ -425,7 +426,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onOpenSql
       {view === 'schema' ? (
         <div className="table-body scroll">
           {detailsError && <pre className="error-panel">{detailsError}</pre>}
-          {details ? <TableSchemaView details={details} onOpenSql={onOpenSql} /> : !detailsError && <div className="placeholder">Loading…</div>}
+          {details ? <TableSchemaView details={details} onEditSchema={onEditSchema} onOpenSql={onOpenSql} /> : !detailsError && <div className="placeholder">Loading…</div>}
         </div>
       ) : (
         <>

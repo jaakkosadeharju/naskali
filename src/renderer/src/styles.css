@@ -1218,3 +1218,91 @@ kbd {
   flex: 1;
   padding: 6px 4px;
 }
+
+.table-designer {
+  color: var(--text);
+  width: min(640px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+.table-designer:not([open]) {
+  display: none;
+}
+.table-designer::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+.table-confirm {
+  width: min(460px, calc(100vw - 40px));
+}
+.table-designer fieldset {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+.table-designer form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.table-designer p {
+  margin: 0 0 8px;
+}
+.table-confirm .dialog-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.designer-columns input:not([type='checkbox']) {
+  width: 100%;
+  min-width: 0;
+}
+.designer-columns th:nth-child(n + 3) {
+  white-space: nowrap;
+}
+button.danger {
+  color: var(--error);
+  border-color: var(--error);
+}
+.designer-type,
+.designer-type-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.designer-type-field > span {
+  color: var(--muted);
+}
+.designer-foreign-keys,
+.designer-foreign-key,
+.designer-preview {
+  display: grid;
+  gap: 10px;
+}
+.designer-foreign-keys {
+  justify-items: start;
+}
+.designer-foreign-keys h3 {
+  margin: 0;
+}
+.designer-foreign-key {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+}
+.designer-key-pair {
+  align-items: end;
+}
+.designer-key-pair label {
+  min-width: 0;
+}
+.designer-preview textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 10px;
+  resize: vertical;
+  white-space: pre;
+}
