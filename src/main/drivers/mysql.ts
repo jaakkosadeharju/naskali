@@ -119,6 +119,8 @@ export class MySqlDriver implements Driver {
       let rowCount = 0
       let header: QueryHeader | null = null
       let failed = false
+      // Result sets seen so far; each one's rows follow its 'fields' event.
+      let resultSets = 0
 
       const q = conn.query({ sql, rowsAsArray: true })
       q.on('error', (err: Error) => {
@@ -126,12 +128,15 @@ export class MySqlDriver implements Driver {
         this.running = false
         reject(err)
       })
-      q.on('fields', (f: FieldPacket[]) => {
+      q.on('fields', (f: FieldPacket[] | undefined) => {
+        if (!f) return // OK packets (e.g. the status after CALL) report no fields
         // Statements like CALL can return several result sets; show the first.
+        resultSets++
         if (!fields) fields = f
       })
       q.on('result', (r: unknown) => {
         if (Array.isArray(r)) {
+          if (resultSets !== 1) return // a later result set's rows don't fit the first one's columns
           rowCount++
           if (rows.length < MAX_ROWS) rows.push(r.map(normalise))
         } else if (!header) {
