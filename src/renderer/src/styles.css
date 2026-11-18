@@ -1,10 +1,11 @@
 :root {
-  --bg: #1e1e1e;
-  --bg-2: #252526;
-  --bg-3: #2d2d30;
-  --border: #3c3c3c;
-  --text: #d4d4d4;
-  --muted: #8a8a8a;
+  --bg: #151a23;
+  --bg-2: #1b222e;
+  --bg-3: #242e3d;
+  --border: #303b4d;
+  --text: #dae4f3;
+  --muted: #9aabc1;
+  --focus: #91b9ff;
   --accent: #0e639c;
   --accent-hover: #1177bb;
   --error: #f48771;
@@ -47,8 +48,8 @@ body,
 .app {
   display: grid;
   height: 100%;
-  grid-template-columns: 260px minmax(0, 1fr) auto;
-  grid-template-rows: 38px 1fr 24px;
+  grid-template-columns: clamp(210px, 19vw, 270px) minmax(0, 1fr) auto;
+  grid-template-rows: 44px minmax(0, 1fr) 24px;
   grid-template-areas:
     'toolbar toolbar toolbar'
     'sidebar main inspector'
@@ -59,9 +60,9 @@ body,
   grid-area: toolbar;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px;
-  background: var(--bg-3);
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--bg-2);
   border-bottom: 1px solid var(--border);
 }
 .app[data-connection-color] .toolbar {
@@ -70,15 +71,11 @@ body,
 .spacer {
   flex: 1;
 }
-.conn-label {
-  color: var(--muted);
-}
-
 button {
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 5px;
   padding: 4px 10px;
   cursor: pointer;
   font: inherit;
@@ -98,6 +95,11 @@ button.primary {
 button.primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
 
 input {
   background: var(--bg);
@@ -109,7 +111,7 @@ input {
   width: 100%;
 }
 input:focus {
-  outline: 1px solid var(--accent-hover);
+  outline: 1px solid var(--focus);
 }
 
 .sidebar {
@@ -135,10 +137,26 @@ input:focus {
 .tab-panel[hidden] {
   display: none;
 }
+.query-panel:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
 .editor {
-  flex: 0 0 45%;
-  min-height: 120px;
-  border-bottom: 4px solid var(--bg-3);
+  min-height: 0;
+  overflow: hidden;
+}
+.query-splitter {
+  cursor: row-resize;
+  touch-action: none;
+  background: linear-gradient(var(--border), var(--border)) center / 100% 1px no-repeat;
+}
+.query-splitter:hover,
+.query-splitter:focus-visible {
+  background-color: color-mix(in srgb, var(--accent) 28%, var(--bg-2));
+}
+.query-splitter:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
 }
 .results {
   flex: 1;
@@ -153,9 +171,17 @@ input:focus {
 }
 .query-results-actions {
   display: flex;
-  justify-content: flex-end;
-  padding: 4px 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--bg-2);
   border-bottom: 1px solid var(--border);
+}
+.pane-heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
 }
 .row-export {
   display: flex;
@@ -188,6 +214,15 @@ input:focus {
 .grid-copy-menu button:focus-visible {
   outline: 1px solid var(--accent-hover);
 }
+.grid-copy-error {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  border-radius: 3px;
+  background: var(--bg-2);
+}
+.grid-copy-error,
 .grid-copy-menu [role='alert'] {
   padding: 3px 8px;
   color: var(--error);
@@ -195,10 +230,12 @@ input:focus {
 
 /* Tabs */
 .tabbar {
+  --tab-inset: 5px;
   position: relative;
   display: flex;
-  height: 32px;
-  flex: 0 0 32px;
+  flex: 0 0 42px;
+  gap: 4px;
+  padding: var(--tab-inset) 8px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
@@ -209,16 +246,17 @@ input:focus {
   display: flex;
   flex: none;
   align-items: center;
-  border-right: 1px solid var(--border);
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: var(--muted);
   white-space: nowrap;
   user-select: none;
 }
 .tab-drop-slot {
   position: absolute;
-  inset-block: 1px;
+  inset-block: var(--tab-inset);
   border: 1px dashed var(--accent-hover);
-  border-radius: 3px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   pointer-events: none;
 }
@@ -230,12 +268,13 @@ input:focus {
   cursor: grabbing;
 }
 .tab:hover {
+  background: var(--bg-3);
   color: var(--text);
 }
 .tab.active {
-  background: var(--bg);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent-hover) 65%, var(--border));
   color: #fff;
-  box-shadow: inset 0 2px 0 var(--accent-hover);
 }
 .tab-label {
   touch-action: pan-y;
@@ -249,7 +288,7 @@ input:focus {
   background: transparent;
 }
 .tab-label:focus-visible {
-  outline: 1px solid var(--accent-hover);
+  outline: 1px solid var(--focus);
   outline-offset: -2px;
 }
 .tab-close {
@@ -281,13 +320,28 @@ input:focus {
 .table-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 12px;
   border-bottom: 1px solid var(--border);
 }
 .table-title {
-  font-weight: 600;
-  font-size: 14px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 6px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 650;
+}
+.table-title span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
 }
 .segmented {
   display: inline-flex;
@@ -441,6 +495,8 @@ select {
   grid-area: status;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 0 10px;
   background: var(--accent);
   color: #fff;
@@ -448,6 +504,42 @@ select {
 }
 .statusbar .warn {
   color: #ffe08a;
+}
+.workspace-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conn-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 75%;
+  white-space: nowrap;
+}
+.conn-label::before {
+  content: '';
+  flex: 0 0 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.conn-label > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn-schema,
+.conn-version {
+  padding-left: 8px;
+  border-left: 1px solid #fff5;
+}
+@media (max-width: 900px) {
+  .conn-version {
+    display: none;
+  }
 }
 
 .placeholder {
@@ -471,14 +563,29 @@ select {
   flex-direction: column;
   height: 100%;
 }
-.tree-header {
+.tree-heading,
+.tree-actions {
   display: flex;
-  gap: 4px;
-  padding: 6px;
-  border-bottom: 1px solid var(--border);
+  align-items: center;
 }
-.tree-header button {
-  padding: 2px 8px;
+.tree-heading {
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px 4px 10px;
+}
+.tree-actions {
+  gap: 4px;
+}
+.tree-actions button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+.tree-filter {
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--border);
 }
 .schema-tree > ul {
   flex: 1;
@@ -502,6 +609,11 @@ select {
 }
 .node:hover {
   background: var(--bg-3);
+}
+.table-node.selected {
+  background: color-mix(in srgb, var(--accent) 32%, var(--bg-2));
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, white);
+  color: #fff;
 }
 .node.schema.current {
   font-weight: 600;

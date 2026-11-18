@@ -13,23 +13,25 @@ import {
 } from '@glideapps/glide-data-grid'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { COPY_COMMANDS } from '../../../shared/menuCommands'
+import { useMenuActions } from '../menuActions'
 import { exportRows, exportSelectionAsJson } from '../../../shared/exportRows'
 import type { CellValue, ExportFormat, ResultField } from '../../../shared/types'
 import { useInspector } from '../inspector'
 
 
 const darkTheme: Partial<Theme> = {
-  accentColor: '#3794ff',
-  accentLight: 'rgba(55, 148, 255, 0.2)',
-  textDark: '#d4d4d4',
-  textMedium: '#a0a0a0',
-  textLight: '#7a7a7a',
-  textHeader: '#cccccc',
-  bgCell: '#1e1e1e',
-  bgCellMedium: '#252526',
-  bgHeader: '#252526',
-  bgHeaderHasFocus: '#2d2d30',
-  bgHeaderHovered: '#2d2d30',
+  accentColor: '#80afff',
+  accentLight: 'rgba(128, 175, 255, 0.22)',
+  textDark: '#dce5f2',
+  textMedium: '#a3b2c7',
+  textLight: '#899ab2',
+  textHeader: '#d1dced',
+  bgCell: '#151a23',
+  bgCellMedium: '#1b222e',
+  bgHeader: '#1b222e',
+  bgHeaderHasFocus: '#253144',
+  bgHeaderHovered: '#253144',
   borderColor: 'rgba(255, 255, 255, 0.08)',
   horizontalBorderColor: 'rgba(255, 255, 255, 0.05)',
   bgSearchResult: '#613214',
@@ -37,7 +39,7 @@ const darkTheme: Partial<Theme> = {
   baseFontStyle: '13px',
   headerFontStyle: '600 13px'
 }
-const MUTED = '#6a6a6a'
+const MUTED = '#899ab2'
 const nullTheme: Partial<Theme> = { textDark: MUTED }
 const editedTheme: Partial<Theme> = { bgCell: '#4a3f12' }
 const editedNullTheme: Partial<Theme> = { bgCell: '#4a3f12', textDark: '#a89a6a' }
@@ -368,7 +370,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
     return () => window.removeEventListener('pointerdown', dismiss, true)
   }, [menu])
 
-  async function copyAs(format: ExportFormat | 'json-with-headers', target: CopyMenu): Promise<void> {
+  async function copyAs(format: ExportFormat | 'json-with-headers', target: Pick<CopyMenu, 'columns' | 'rows'>): Promise<void> {
     try {
       const headers = target.columns.map((col) => fields[col].name)
       const values = target.rows.map((row) => target.columns.map((col) => rows[row]?.[col] ?? null))
@@ -376,11 +378,23 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
         ? exportSelectionAsJson(headers, values)
         : Array.from(exportRows(format, headers, values)).join('')
       await navigator.clipboard.writeText(text)
-      closeCopyMenu()
+      if (menu) closeCopyMenu()
+      setCopyError(false)
     } catch {
       setCopyError(true)
     }
   }
+
+  const cell = selection.current?.cell
+  const selectedRow = cell?.[1] ?? selection.rows.first()
+  const selectedColumn = cell?.[0] ?? selection.columns.first()
+  const hasCopySelection = fields.length > 0 && rows.length > 0 &&
+    (selectedRow !== undefined || selectedColumn !== undefined)
+  useMenuActions(COPY_COMMANDS, hasCopySelection, (command) => {
+    const target = copySelection(selection, selectedColumn ?? 0, selectedRow ?? 0, fields.length, rows.length)
+    const format = command === 'copy-csv' ? 'csv' : command === 'copy-json' ? 'json' : 'json-with-headers'
+    void copyAs(format, target)
+  })
 
   return (
     <>
@@ -419,6 +433,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
           setColumns((cs) => cs.map((c, i) => (i === colIndex ? { ...c, width: newSize } : c)))
         }
       />
+      {copyError && !menu && <div className="grid-copy-error" role="alert">Clipboard unavailable</div>}
       {menu && createPortal(
         <div
           ref={menuRef}

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { installApplicationMenu } from './applicationMenu'
 import { createDriver } from './drivers'
 import { exportRows } from '../shared/exportRows'
 import type { Driver } from './drivers/types'
@@ -58,7 +59,6 @@ function createWindow({ withSplash }: { withSplash: boolean }): void {
     minHeight: 500,
     backgroundColor: '#1e1e1e',
     title: 'Naskali',
-    autoHideMenuBar: true,
     // Window/taskbar icon on Linux and Windows (macOS takes it from the app bundle).
     ...(process.platform !== 'darwin' ? { icon } : {}),
     webPreferences: {
@@ -68,6 +68,8 @@ function createWindow({ withSplash }: { withSplash: boolean }): void {
       sandbox: true
     }
   })
+
+  installApplicationMenu(win)
 
   // Never navigate the app window away; open external links in the browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -178,6 +180,7 @@ handle('db:previewChanges', (cs: ChangeSet) => previewChanges(requireDriver(), c
 handle('db:applyChanges', (cs: ChangeSet) => applyChanges(requireDriver(), cs))
 
 app.whenReady().then(() => {
+  app.setAboutPanelOptions({ applicationName: 'Naskali', applicationVersion: app.getVersion(), iconPath: icon })
   createWindow({ withSplash: true })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow({ withSplash: false })

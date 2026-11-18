@@ -1,3 +1,5 @@
+import type { MenuCommand } from './menuCommands'
+
 // Types shared between the main process, preload and renderer.
 
 export type DriverKind = 'mysql' | 'postgres' | 'mssql' | 'sqlite'
@@ -207,6 +209,8 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
 /** The API the preload script exposes to the renderer as `window.api`. */
 export interface SqlApi {
+  onMenuCommand(listener: (command: MenuCommand) => void): () => void
+  setMenuAvailability(commands: MenuCommand[]): void
   connect(config: ConnectionConfig): Promise<IpcResult<ConnectionInfo>>
   testConnection(config: ConnectionConfig): Promise<IpcResult<void>>
   disconnect(): Promise<IpcResult<void>>

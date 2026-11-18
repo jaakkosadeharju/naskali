@@ -13,6 +13,21 @@ self.MonacoEnvironment = {
 
 loader.config({ monaco })
 
+monaco.editor.defineTheme('naskali-dark', {
+  base: 'vs-dark',
+  inherit: true,
+  rules: [],
+  colors: {
+    'editor.background': '#151a23',
+    'editorLineNumber.foreground': '#8191a8',
+    'editorLineNumber.activeForeground': '#dae4f3',
+    'editor.lineHighlightBackground': '#1d2532',
+    'editor.selectionBackground': '#294569',
+    'editorWidget.background': '#1b222e',
+    'editorWidget.border': '#303b4d'
+  }
+})
+
 /**
  * Monaco's built-in `mysql` tokenizer lets `[^']+` swallow the backslash in
  * `'O\'Brien'`, ending the string early. Register a patched copy under our own
