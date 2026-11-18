@@ -46,6 +46,7 @@ const editedNullTheme: Partial<Theme> = { bgCell: '#4a3f12', textDark: '#a89a6a'
 const newTheme: Partial<Theme> = { bgCell: '#1d3b25' }
 const newMutedTheme: Partial<Theme> = { bgCell: '#1d3b25', textDark: '#6f8f76' }
 const deletedTheme: Partial<Theme> = { bgCell: '#46201f', textDark: '#a07070' }
+const readOnlyHeaderTheme: Partial<Theme> = { textHeader: MUTED }
 
 function display(v: CellValue): string {
   if (v === null) return 'NULL'
@@ -62,7 +63,10 @@ function initialWidth(field: ResultField, idx: number, rows: CellValue[][]): num
 
 /** Optional editing support; without it the grid is read-only. Row/col are grid indices. */
 export interface GridEditing {
-  editable: (col: number) => boolean
+  /** Whether a cell can be edited (rows of a joined table without a key can't). */
+  editable: (row: number, col: number) => boolean
+  /** Why a cell can't be edited, for the inspector; defaults to a generic reason. */
+  readOnlyReason?: (row: number, col: number) => string | undefined
   nullable: (col: number) => boolean
   isEdited: (row: number, col: number) => boolean
   rowState: (row: number) => 'new' | 'deleted' | undefined
@@ -94,6 +98,8 @@ interface Props {
   describeRow?: (row: number) => string
   /** Cells that link somewhere (foreign keys): drawn with a ↗ button that calls `open`. Keep it stable. */
   cellLinks?: CellLinks
+  /** Columns drawn with a muted header (not editable while others are). Keep it stable. */
+  readOnlyColumns?: ReadonlySet<number>
 }
 
 export interface CellLinks {
@@ -146,7 +152,7 @@ interface CopyMenu {
   rows: number[]
 }
 
-export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selectionResetKey, sourceLabel, columnTypes, describeRow, cellLinks }: Props): JSX.Element {
+export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selectionResetKey, sourceLabel, columnTypes, describeRow, cellLinks, readOnlyColumns }: Props): JSX.Element {
   const [columns, setColumns] = useState<GridColumn[]>([])
   const [selection, setSelection] = useState<GridSelection>(emptySelection)
   const [menu, setMenu] = useState<CopyMenu | null>(null)
@@ -178,6 +184,11 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
     setMenu(null)
   }, [fields])
 
+  const shownColumns = useMemo(
+    () => (readOnlyColumns?.size ? columns.map((c, i) => (readOnlyColumns.has(i) ? { ...c, themeOverride: readOnlyHeaderTheme } : c)) : columns),
+    [columns, readOnlyColumns]
+  )
+
   useEffect(() => {
     setSelection(emptySelection)
   }, [selectionResetKey])
@@ -198,7 +209,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
     if (!inspector?.open || inspector.ownerRef.current !== gridId || curRow < 0 || curRow >= rows.length || !fields[curCol]) return
     const state = editing?.rowState(curRow)
     const isDefault = state === 'new' && !!editing?.isDefault(curRow, curCol)
-    const canEdit = !!editing && editing.editable(curCol) && state !== 'deleted'
+    const canEdit = !!editing && editing.editable(curRow, curCol) && state !== 'deleted'
     const edited = state === 'new' ? !isDefault : !!editing?.isEdited(curRow, curCol)
     const [row, col] = [curRow, curCol]
     inspector.show({
@@ -217,7 +228,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
           ? 'read-only result'
           : state === 'deleted'
             ? 'row is marked for deletion'
-            : 'column is not editable',
+            : (editing.readOnlyReason?.(row, col) ?? 'column is not editable'),
       link: cellLinks?.has(row, col) ? { label: cellLinks.label(row, col), open: () => cellLinks.open(row, col) } : undefined
     })
   }, [inspector, gridId, curRow, curCol, rows, fields, columnTypes, sourceLabel, describeRow, editing, cellLinks])
@@ -274,7 +285,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
   /** Enter / double-click on a cell that can't be edited opens it in the inspector. */
   const onCellActivated = useCallback(
     ([col, row]: Item) => {
-      const editable = editing?.editable(col) && editing.rowState(row) !== 'deleted'
+      const editable = editing?.editable(row, col) && editing.rowState(row) !== 'deleted'
       if (editable || !inspector) return
       inspector.ownerRef.current = gridId
       inspector.setOpen(true)
@@ -295,8 +306,8 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
           kind: GridCellKind.Text,
           data: '',
           displayData: 'DEFAULT',
-          allowOverlay: editing.editable(col),
-          readonly: !editing.editable(col),
+          allowOverlay: editing.editable(row, col),
+          readonly: !editing.editable(row, col),
           contentAlign: 'left', // right-aligned it gets clipped in narrow numeric columns
           themeOverride: newMutedTheme
         }
@@ -306,7 +317,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
       else if (state === 'new') theme = v === null ? newMutedTheme : newTheme
       else if (editing?.isEdited(row, col)) theme = v === null ? editedNullTheme : editedTheme
       else if (v === null) theme = nullTheme
-      const readonly = !editing?.editable(col) || state === 'deleted'
+      const readonly = !editing?.editable(row, col) || state === 'deleted'
       return {
         kind: GridCellKind.Text,
         data: v === null ? '' : String(v),
@@ -341,7 +352,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
       for (let row = r.y; row < r.y + r.height; row++) {
         if (editing.rowState(row) === 'deleted') continue
         for (let col = r.x; col < r.x + r.width; col++) {
-          if (editing.editable(col) && editing.nullable(col)) editing.onEdit(row, col, null)
+          if (editing.editable(row, col) && editing.nullable(col)) editing.onEdit(row, col, null)
         }
       }
       return false // handled; skip Glide's default "clear to empty"
@@ -399,7 +410,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
   return (
     <>
       <DataEditor
-        columns={columns}
+        columns={shownColumns}
         rows={rows.length}
         getCellContent={getCellContent}
         getCellsForSelection={true}
