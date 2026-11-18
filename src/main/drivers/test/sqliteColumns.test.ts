@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
-import { fieldsOf } from './sqliteColumns'
-import { toFields } from './sqlite'
+import { fieldsOf } from '../sqliteColumns'
+import { toFields } from '../sqlite'
 
 const db = new DatabaseSync(':memory:')
 db.exec(`

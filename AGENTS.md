@@ -22,9 +22,9 @@ Use strict TypeScript, two-space indentation, single quotes, and semicolon-free 
 
 ## Testing
 
-Run `npm test`, `npm run typecheck` and `npm run build` before submitting. Tests use Vitest and sit next to the code they cover:
+Run `npm test`, `npm run typecheck` and `npm run build` before submitting. Tests use Vitest and live in a `test/` folder inside the directory whose code they cover (e.g. `src/main/test/resultEditing.test.ts` for `src/main/resultEditing.ts`). Test helpers go there too, such as the fake `Driver` in `src/main/test/fakeDriver.ts`.
 
-- `*.test.ts` files are unit tests. `npm test` runs them, and they need no database. Use a fake `Driver` for main-process logic.
+- `*.test.ts` files are unit tests. `npm test` runs them, and they need no database. Use the fake `Driver` for main-process logic.
 - `*.db.test.ts` files are integration tests against the seeded databases. Run `npm run db:up` first, then `npm run test:db`. Tests that change rows must restore them.
 
 Add new logic test-first where practical. There is no coverage threshold. Smoke-test affected workflows with `npm run dev` and the seeded database. For table editing changes, verify that successful edits persist and failed batches roll back.

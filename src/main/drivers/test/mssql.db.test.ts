@@ -1,6 +1,6 @@
 import { describe } from 'vitest'
-import { MssqlDriver } from './mssql'
-import { driverSuite } from '../testing/driverSuite'
+import { MssqlDriver } from '../mssql'
+import { driverSuite } from '../../test/driverSuite'
 
 // SQL Server is opt-in (npm run db:up:mssql): set NASKALI_MSSQL=1 to run these.
 describe.runIf(process.env.NASKALI_MSSQL === '1')('SQL Server', () => {

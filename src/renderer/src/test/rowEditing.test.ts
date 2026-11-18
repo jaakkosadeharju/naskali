@@ -14,8 +14,8 @@ import {
   toChangeSets,
   toggleDelete,
   type EditTarget
-} from './rowEditing'
-import type { CellValue } from '../../shared/types'
+} from '../rowEditing'
+import type { CellValue } from '../../../shared/types'
 
 // Result: o.id, o.status, c.id, c.name, UPPER(c.name)
 const orders: EditTarget = {

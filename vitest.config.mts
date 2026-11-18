@@ -8,15 +8,15 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'node',
-          include: ['src/**/*.test.ts'],
-          exclude: ['src/**/*.db.test.ts']
+          include: ['src/**/test/*.test.ts'],
+          exclude: ['src/**/test/*.db.test.ts']
         }
       },
       {
         test: {
           name: 'db',
           environment: 'node',
-          include: ['src/**/*.db.test.ts'],
+          include: ['src/**/test/*.db.test.ts'],
           testTimeout: 30_000,
           fileParallelism: false
         }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { resultEditInfo } from './resultEditing'
-import { fakeDriver, table } from './testing/fakeDriver'
-import type { ResultField } from '../shared/types'
+import { resultEditInfo } from '../resultEditing'
+import { fakeDriver, table } from './fakeDriver'
+import type { ResultField } from '../../shared/types'
 
 const customers = table('shop', 'customers', [
   { name: 'id', key: 'PRI', nullable: false },

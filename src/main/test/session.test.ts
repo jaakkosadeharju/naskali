@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { applyChanges, previewChanges } from './session'
-import { fakeDriver, table } from './testing/fakeDriver'
-import type { ChangeSet } from '../shared/types'
+import { applyChanges, previewChanges } from '../session'
+import { fakeDriver, table } from './fakeDriver'
+import type { ChangeSet } from '../../shared/types'
 
 const tables = () => [
   table('shop', 'customers', [{ name: 'id', key: 'PRI' }, { name: 'name', type: 'varchar(100)' }]),

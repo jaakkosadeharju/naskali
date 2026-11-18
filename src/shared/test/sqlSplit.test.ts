@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SPLIT_RULES, isPlainSelect, splitStatements, statementAt } from './sqlSplit'
+import { SPLIT_RULES, isPlainSelect, splitStatements, statementAt } from '../sqlSplit'
 
 const texts = (sql: string, rules = SPLIT_RULES.mysql): string[] => splitStatements(sql, rules).map((s) => s.text)
 
