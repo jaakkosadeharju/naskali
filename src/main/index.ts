@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { installApplicationMenu } from './applicationMenu'
@@ -6,8 +6,9 @@ import { createDriver } from './drivers'
 import { exportRows } from '../shared/exportRows'
 import type { Driver } from './drivers/types'
 import { applyChanges, previewChanges, tableData } from './session'
+import { changeTable, createTableSql } from './tableSchema'
 import { deleteConnection, listConnections, saveConnection } from './connectionStore'
-import type { CellValue, ChangeSet, ConnectionConfig, ExportFormat, IpcResult, TableDataRequest } from '../shared/types'
+import type { CellValue, ChangeSet, ConnectionConfig, CreateTableAction, ExplorerMenuAction, ExportFormat, IpcResult, TableAction, TableDataRequest } from '../shared/types'
 // `?asset` makes electron-vite copy the file into the build and give us its runtime path.
 import icon from '../../resources/icon.png?asset'
 // splash.html loads splash.png from the same folder (resources/ is packaged as-is).
@@ -174,6 +175,20 @@ handle('db:pickSqliteFile', async () => {
   const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
+handle('db:explorerMenu', (target: 'schema' | 'table') =>
+  new Promise<ExplorerMenuAction | null>((resolve) => {
+    const menu = Menu.buildFromTemplate(target === 'schema'
+      ? [{ label: 'New table…', click: () => resolve('new') }]
+      : [
+          { label: 'Edit schema…', click: () => resolve('edit') },
+          { type: 'separator' },
+          { label: 'Truncate table…', click: () => resolve('truncate') },
+          { label: 'Drop table…', click: () => resolve('drop') }
+        ])
+    menu.popup({ callback: () => resolve(null) })
+  }))
+handle('db:previewCreateTable', async (action: CreateTableAction) => createTableSql(requireDriver().dialect, action))
+handle('db:changeTable', (action: TableAction) => changeTable(requireDriver(), action))
 handle('db:tableDetails', (schema: string, table: string) => requireDriver().tableDetails(schema, table))
 handle('db:tableData', (req: TableDataRequest) => tableData(requireDriver(), req))
 handle('db:previewChanges', (cs: ChangeSet) => previewChanges(requireDriver(), cs))

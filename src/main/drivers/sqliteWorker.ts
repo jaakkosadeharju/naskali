@@ -88,8 +88,7 @@ function handle(req: WorkerRequest): unknown {
   switch (req.op) {
     case 'query': {
       const { stmt, action } = prepareEditorQuery(db, req.sql)
-      const fields = fieldsOf(stmt)
-      if (fields.length === 0) {
+      if (stmt.columns().length === 0) {
         const insert = action === constants.SQLITE_INSERT
         const lastId = insert ? db.prepare('SELECT last_insert_rowid() AS id') : null
         lastId?.setReadBigInts(true)
@@ -112,13 +111,15 @@ function handle(req: WorkerRequest): unknown {
         }
         rows.push(row as unknown as unknown[])
       }
-      return { kind: 'rows', fields, rows, truncated } satisfies QueryReply
+      // Stepping can recompile the statement after another connection changes the schema.
+      return { kind: 'rows', fields: fieldsOf(stmt), rows, truncated } satisfies QueryReply
     }
     case 'select': {
       const stmt = db.prepare(req.sql)
       stmt.setReadBigInts(true)
       stmt.setReturnArrays(true)
-      return { fields: fieldsOf(stmt), rows: stmt.all(...req.params.map(bindable)) }
+      const rows = stmt.all(...req.params.map(bindable))
+      return { fields: fieldsOf(stmt), rows }
     }
     case 'exec': {
       const stmt = db.prepare(req.sql)

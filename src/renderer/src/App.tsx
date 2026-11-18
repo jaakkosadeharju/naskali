@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } 
 import { monaco } from './monacoSetup'
 import { completionState } from './completion'
 import { ConnectDialog } from './components/ConnectDialog'
+import { TableDesigner, type DesignerRequest } from './components/TableDesigner'
 import { SchemaTree } from './components/SchemaTree'
 import { QuerySplit } from './components/QuerySplit'
 import { SqlEditor, sqlToRun } from './components/SqlEditor'
@@ -11,7 +12,7 @@ import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
 import { TablePalette } from './components/TablePalette'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
-import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo } from '../../shared/types'
+import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo, type TableAction } from '../../shared/types'
 import { setEditorDialect } from './monacoSetup'
 import type { MenuCommand } from '../../shared/menuCommands'
 import { MenuActionsContext, type RegisterMenuAction } from './menuActions'
@@ -22,8 +23,11 @@ interface Connection {
   label: string
   color: ConnectionColor
   profileId: string | null
+  readOnly: boolean
   info: ConnectionInfo
 }
+
+const tableVersionKey = (schema: string, table: string): string => JSON.stringify([schema, table])
 
 function connectionLabel(cfg: ConnectionConfig, info: ConnectionInfo): string {
   if (cfg.driver === 'sqlite') return cfg.file.split(/[\\/]/).pop() || cfg.file
@@ -106,6 +110,8 @@ export function App(): JSX.Element {
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeId, setActiveId] = useState(FIRST_QUERY.id)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [designer, setDesigner] = useState<DesignerRequest | null>(null)
+  const [tableVersions, setTableVersions] = useState<Record<string, number>>({})
   const tabbar = useRef<HTMLElement>(null)
   const tabDrag = useRef<TabDrag | null>(null)
   const suppressTabClick = useRef(false)
@@ -133,7 +139,7 @@ export function App(): JSX.Element {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault()
         e.stopPropagation()
-        if (!connected) return
+        if (!connected || designer) return
         setPaletteOpen((open) => {
           if (!open) focusBeforePalette.current = document.activeElement
           return !open
@@ -142,7 +148,7 @@ export function App(): JSX.Element {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [connected])
+  }, [connected, designer])
   const closePalette = (): void => {
     setPaletteOpen(false)
     // Give focus back to where the user was (editor, grid…).
@@ -212,7 +218,7 @@ export function App(): JSX.Element {
       setTabs(restored)
       setActiveId(restored.find((tab) => tab.id === workspace?.activeId)?.id ?? lastQueryId.current)
       connectionGeneration.current++
-      setConn({ label: connectionLabel(cfg, info), color, profileId, info })
+      setConn({ label: connectionLabel(cfg, info), color, profileId, info, readOnly: cfg.driver === 'sqlite' && !!cfg.readOnly })
       setEditorDialect(info.driver)
       updateDb(info.schema)
       void refreshSchema()
@@ -244,6 +250,7 @@ export function App(): JSX.Element {
     setSchemas([])
     completionState.schemas = []
     setTabs([])
+    setTableVersions({})
     setActiveId(FIRST_QUERY.id)
     setInspected(null)
     setPaletteOpen(false)
@@ -252,7 +259,7 @@ export function App(): JSX.Element {
 
   const execute = async (id: string): Promise<void> => {
     const editor = editors.current.get(id)
-    if (!conn || disconnecting || !editor || runningQuery.current) return
+    if (!conn || disconnecting || designer || !editor || runningQuery.current) return
     const sql = sqlToRun(editor)
     if (!sql) return
 
@@ -444,7 +451,54 @@ export function App(): JSX.Element {
   }, [])
 
   const workspaceReady = connected && !disconnecting
-  const workspaceInteractive = workspaceReady && !paletteOpen
+  const workspaceInteractive = workspaceReady && !paletteOpen && !designer
+  const canChangeSchema = workspaceInteractive && !queryRunning && !conn?.readOnly
+
+  const newTable = (schema?: string): void => {
+    const target = schema ?? (schemas.some((item) => item.name === currentDb) ? currentDb : schemas[0]?.name)
+    if (target) setDesigner({ kind: 'create', schema: target })
+  }
+
+  const openExplorerMenu = async (schema: string, table?: string): Promise<void> => {
+    const generation = connectionGeneration.current
+    const result = await window.api.explorerMenu(table === undefined ? 'schema' : 'table')
+    if (generation !== connectionGeneration.current || runningQuery.current || !result.ok || !result.value) return
+    if (result.value === 'new') newTable(schema)
+    else if (table !== undefined) setDesigner({ kind: result.value, schema, table })
+  }
+
+  const applyTableAction = async (action: TableAction): Promise<string | null> => {
+    const { schema, table } = action
+    const matches = (tab: Tab): tab is Extract<Tab, { kind: 'table' }> => tab.kind === 'table' && tab.schema === schema && tab.table === table
+    if (tabs.some((tab) => matches(tab) && dirtyTabs.current.has(tab.id))) {
+      return 'Save or discard pending row edits in this table before changing it.'
+    }
+    const result = await window.api.changeTable(action)
+    if (!result.ok) return result.error
+
+    if (action.kind === 'drop') {
+      setTabs((current) => current.filter((tab) => !matches(tab)))
+      if (matches(activeTab)) setActiveId(lastQueryId.current)
+    } else if (action.kind === 'create') {
+      openTable(schema, table, 'schema')
+    } else {
+      if (action.kind === 'renameColumn' || action.kind === 'dropColumn') {
+        const updateFilters = (filters: RowFilter[]): RowFilter[] => filters.flatMap((filter) => {
+          if (filter.column !== action.column) return [filter]
+          return action.kind === 'renameColumn' ? [{ ...filter, column: action.name }] : []
+        })
+        setTabs((current) => current.map((tab) => matches(tab) ? {
+          ...tab,
+          filters: tab.filters && updateFilters(tab.filters),
+          applied: tab.applied && { ...tab.applied, filters: updateFilters(tab.applied.filters) }
+        } : tab))
+      }
+      setTableVersions((versions) => ({ ...versions, [tableVersionKey(schema, table)]: (versions[tableVersionKey(schema, table)] ?? 0) + 1 }))
+    }
+    await refreshSchema()
+    setDesigner(null)
+    return null
+  }
   const menuScope = workspaceInteractive ? registerMenuAction : null
   const canRun = workspaceInteractive && !queryRunning && activeTab.kind === 'query'
   const canDisconnect = workspaceInteractive && !queryRunning
@@ -457,7 +511,7 @@ export function App(): JSX.Element {
     'refresh-schema': workspaceInteractive ? () => void refreshSchema() : undefined,
     'run-query': canRun ? () => void execute(activeTab.id) : undefined,
     'cancel-query': queryRunning ? () => void window.api.cancel() : undefined,
-    'find-table': workspaceReady ? () => {
+    'find-table': workspaceReady && !designer ? () => {
       if (paletteOpen) closePalette()
       else {
         focusBeforePalette.current = document.activeElement
@@ -521,6 +575,8 @@ export function App(): JSX.Element {
             onUseDatabase={conn?.info.capabilities.switchSchema ? useSchema : undefined}
             onInsert={insertText}
             onOpenTable={openTable}
+            onNewTable={canChangeSchema && schemas.length > 0 ? newTable : undefined}
+            onContextMenu={canChangeSchema ? openExplorerMenu : undefined}
             onRefresh={workspaceInteractive ? refreshSchema : undefined}
             onDisconnect={canDisconnect ? disconnect : undefined}
           />
@@ -625,6 +681,8 @@ export function App(): JSX.Element {
                 <div key={t.id} className="tab-panel" hidden={t.id !== activeId}>
                   <MenuActionsContext.Provider value={t.id === activeId ? menuScope : null}>
                     <TableView
+                      key={tableVersions[tableVersionKey(t.schema, t.table)] ?? 0}
+                      onEditSchema={canChangeSchema ? () => setDesigner({ kind: 'edit', schema: t.schema, table: t.table }) : undefined}
                       sqlite={conn?.info.driver === 'sqlite'}
                       schema={t.schema}
                       table={t.table}
@@ -667,6 +725,9 @@ export function App(): JSX.Element {
         </footer>
 
         {!conn && <ConnectDialog onConnected={onConnected} />}
+        {conn && designer && (
+          <TableDesigner request={designer} schemas={schemas} driver={conn.info.driver} onClose={() => setDesigner(null)} onApply={applyTableAction} onOpenSql={openInEditor} />
+        )}
         {conn && paletteOpen && (
           <TablePalette
             schemas={schemas}

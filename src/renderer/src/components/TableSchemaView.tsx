@@ -4,10 +4,11 @@ import type { TableDetails } from '../../../shared/types'
 
 interface Props {
   details: TableDetails
+  onEditSchema?: () => void
   onOpenSql: (sql: string) => void
 }
 
-export function TableSchemaView({ details: d, onOpenSql }: Props): JSX.Element {
+export function TableSchemaView({ details: d, onEditSchema, onOpenSql }: Props): JSX.Element {
   const [ddlHtml, setDdlHtml] = useState<string | null>(null)
   useEffect(() => {
     let live = true
@@ -27,7 +28,10 @@ export function TableSchemaView({ details: d, onOpenSql }: Props): JSX.Element {
         {d.comment && ` · ${d.comment}`}
       </p>
 
-      <h3>Columns</h3>
+      <h3>
+        Columns{' '}
+        {d.type === 'BASE TABLE' && onEditSchema && <button className="small" onClick={onEditSchema}>Edit schema…</button>}
+      </h3>
       <table className="info-table">
         <thead>
           <tr>
