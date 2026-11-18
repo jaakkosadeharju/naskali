@@ -162,37 +162,65 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
           </div>
         </div>
 
+        <section className="connection-sidebar" aria-labelledby="saved-connections-heading">
+          <h2 id="saved-connections-heading">Saved connections</h2>
+          <ul className="saved-connection-list">
+            {saved.map((connection) => (
+              <li key={connection.id}>
+                <button
+                  className="saved-connection"
+                  type="button"
+                  aria-current={connection.id === selectedId}
+                  disabled={busy !== null}
+                  onClick={() => selectConnection(connection)}
+                >
+                  <span className="connection-color-swatch" data-connection-color={connection.color ?? 'blue'} aria-hidden="true" />
+                  <span className="saved-connection-details">
+                    <strong title={connection.name}>{connection.name}</strong>
+                    <span>{DRIVER_LABELS[connection.config.driver]}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {saved.length === 0 && <p className="muted">{busy === 'loading' ? 'Loading connections…' : 'No saved connections yet.'}</p>}
+          <button
+            className="new-connection"
+            type="button"
+            aria-current={selectedId === null}
+            disabled={busy !== null}
+            onClick={() => selectConnection()}
+          >
+            + New connection
+          </button>
+        </section>
         <fieldset className="connection-fields" disabled={busy !== null}>
-          <label>
-            Saved connections
-            <select
-              value={selectedId ?? ''}
-              onChange={(e) => selectConnection(saved.find((connection) => connection.id === e.target.value))}
-            >
-              <option value="">New connection</option>
-              {saved.map((connection) => (
-                <option key={connection.id} value={connection.id}>
-                  {connection.name} · {DRIVER_LABELS[connection.config.driver]}
-                </option>
-              ))}
-            </select>
-          </label>
           <div className="row">
             <label className="grow">
               Connection name
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name for saving" />
             </label>
-            <label>
-              Connection color
-              <div className="row connection-color-picker">
-                <span className="connection-color-swatch" aria-hidden="true" />
-                <select value={color} onChange={(e) => setColor(e.target.value as ConnectionColor)}>
-                  {CONNECTION_COLORS.map((option) => (
-                    <option key={option} value={option}>{option[0].toUpperCase() + option.slice(1)}</option>
-                  ))}
-                </select>
+            <fieldset className="connection-color-picker">
+              <legend>Connection color</legend>
+              <div className="row">
+                {CONNECTION_COLORS.map((option) => {
+                  const label = option[0].toUpperCase() + option.slice(1)
+                  return (
+                    <input
+                      key={option}
+                      className="connection-color-swatch"
+                      type="radio"
+                      name="connection-color"
+                      aria-label={label}
+                      title={label}
+                      data-connection-color={option}
+                      checked={color === option}
+                      onChange={() => setColor(option)}
+                    />
+                  )
+                })}
               </div>
-            </label>
+            </fieldset>
           </div>
 
           <div className="segmented driver-picker" role="radiogroup" aria-label="Database type">
@@ -303,9 +331,9 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
             </button>
             {selectedId && <button type="button" onClick={() => void remove()}>Remove</button>}
           </div>
+          {testPassed && <div className="connection-test-success" role="status">Connection successful.</div>}
+          {error && <div className="error" role="alert">{error}</div>}
         </fieldset>
-        {testPassed && <div className="connection-test-success" role="status">Connection successful.</div>}
-        {error && <div className="error" role="alert">{error}</div>}
       </form>
     </div>
   )

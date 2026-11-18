@@ -538,7 +538,7 @@ export function App(): JSX.Element {
   const canRun = workspaceInteractive && !queryRunning && activeTab.kind === 'query'
   const canDisconnect = workspaceInteractive && !queryRunning
   const workspaceCommands: Partial<Record<MenuCommand, () => void>> = {
-    connect: !connected ? () => document.querySelector<HTMLSelectElement>('.connect-dialog select')?.focus() : undefined,
+    connect: !connected ? () => document.querySelector<HTMLButtonElement>('.connection-sidebar button[aria-current="true"]')?.focus() : undefined,
     disconnect: canDisconnect ? () => void disconnect() : undefined,
     'new-query': workspaceInteractive ? () => newQueryTab() : undefined,
     'close-tab': workspaceInteractive && activeTab.id !== FIRST_QUERY.id &&
