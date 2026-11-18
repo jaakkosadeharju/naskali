@@ -7,8 +7,9 @@ import { exportRows } from '../shared/exportRows'
 import type { Driver } from './drivers/types'
 import { applyChanges, previewChanges, tableData } from './session'
 import { changeTable, createTableSql } from './tableSchema'
+import { resultEditInfo } from './resultEditing'
 import { deleteConnection, listConnections, saveConnection } from './connectionStore'
-import type { CellValue, ChangeSet, ConnectionConfig, CreateTableAction, ExplorerMenuAction, ExportFormat, IpcResult, TableAction, TableDataRequest } from '../shared/types'
+import type { CellValue, ChangeSet, ConnectionConfig, CreateTableAction, ExplorerMenuAction, ExportFormat, IpcResult, ResultField, TableAction, TableDataRequest } from '../shared/types'
 // `?asset` makes electron-vite copy the file into the build and give us its runtime path.
 import icon from '../../resources/icon.png?asset'
 // splash.html loads splash.png from the same folder (resources/ is packaged as-is).
@@ -191,8 +192,9 @@ handle('db:previewCreateTable', async (action: CreateTableAction) => createTable
 handle('db:changeTable', (action: TableAction) => changeTable(requireDriver(), action))
 handle('db:tableDetails', (schema: string, table: string) => requireDriver().tableDetails(schema, table))
 handle('db:tableData', (req: TableDataRequest) => tableData(requireDriver(), req))
-handle('db:previewChanges', (cs: ChangeSet) => previewChanges(requireDriver(), cs))
-handle('db:applyChanges', (cs: ChangeSet) => applyChanges(requireDriver(), cs))
+handle('db:previewChanges', (sets: ChangeSet[]) => previewChanges(requireDriver(), sets))
+handle('db:applyChanges', (sets: ChangeSet[]) => applyChanges(requireDriver(), sets))
+handle('db:resultEditInfo', (sql: string, fields: ResultField[]) => resultEditInfo(requireDriver(), sql, fields))
 
 app.whenReady().then(() => {
   app.setAboutPanelOptions({ applicationName: 'Naskali', applicationVersion: app.getVersion(), iconPath: icon })

@@ -356,7 +356,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
   })
 
   const viewSql = async (): Promise<void> => {
-    const r = await window.api.previewChanges(changeSet())
+    const r = await window.api.previewChanges([changeSet()])
     if (r.ok) setPreview(r.value)
     else setSaveError(r.error)
   }
@@ -369,7 +369,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
   const accept = async (): Promise<void> => {
     setSaving(true)
     setSaveError(null)
-    const r = await window.api.applyChanges(changeSet())
+    const r = await window.api.applyChanges([changeSet()])
     setSaving(false)
     if (!r.ok) {
       setSaveError(r.error)

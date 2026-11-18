@@ -1,6 +1,6 @@
 import type { ChangeSet, ChangeSummary, TableDataRequest, TableDataResult } from '../shared/types'
 import { display, qualify, render, type Sql } from './dialect'
-import { buildChangeStatements, buildWhere } from './tableQuery'
+import { buildChangeStatements, buildWhere, type ChangeStatement } from './tableQuery'
 import type { Driver } from './drivers/types'
 
 // Database-independent table operations on top of a Driver: paging/filtering
@@ -30,20 +30,26 @@ export async function tableData(driver: Driver, req: TableDataRequest): Promise<
   return { fields, rows, total, offset, sql: display(select, d), elapsedMs: Math.round(performance.now() - started), editDisabledReason }
 }
 
-export async function previewChanges(driver: Driver, cs: ChangeSet): Promise<string[]> {
-  const stmts = buildChangeStatements(driver.dialect, cs, await driver.columnMeta(cs.schema, cs.table))
-  return stmts.map((s) => display(s, driver.dialect) + ';')
+/** Statements for every change set, in order; validates them all before anything runs. */
+async function changeStatements(driver: Driver, sets: ChangeSet[]): Promise<ChangeStatement[]> {
+  const out: ChangeStatement[] = []
+  for (const cs of sets) out.push(...buildChangeStatements(driver.dialect, cs, await driver.columnMeta(cs.schema, cs.table)))
+  return out
+}
+
+export async function previewChanges(driver: Driver, sets: ChangeSet[]): Promise<string[]> {
+  return (await changeStatements(driver, sets)).map((s) => display(s, driver.dialect) + ';')
 }
 
 /**
- * Applies a change set atomically (driver.inTransaction uses a dedicated
- * connection). Every statement must affect exactly one row – UPDATEs count
- * matched rows – otherwise everything is rolled back, e.g. when someone else
- * deleted the row meanwhile.
+ * Applies change sets (one per table) atomically: driver.inTransaction uses a
+ * dedicated connection. Every statement must affect exactly one row – UPDATEs
+ * count matched rows – otherwise everything is rolled back, e.g. when someone
+ * else deleted the row meanwhile.
  */
-export async function applyChanges(driver: Driver, cs: ChangeSet): Promise<ChangeSummary> {
+export async function applyChanges(driver: Driver, sets: ChangeSet[]): Promise<ChangeSummary> {
   const d = driver.dialect
-  const stmts = buildChangeStatements(d, cs, await driver.columnMeta(cs.schema, cs.table))
+  const stmts = await changeStatements(driver, sets)
   await driver.inTransaction(async (exec) => {
     for (const s of stmts) {
       const r = render(s, d)
