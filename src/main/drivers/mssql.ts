@@ -133,22 +133,30 @@ export class MssqlDriver implements Driver {
       req.on('rowsaffected', (n: number) => {
         affected += n
       })
-      const finish = (): void => {
-        this.current = null
+      let finished = false
+      const finish = async (): Promise<void> => {
         const elapsedMs = Math.round(performance.now() - started)
         const [first, ...additionalResults] = resultSets
-        if (first) {
-          resolve({ kind: 'rows', ...first, elapsedMs, additionalResults })
-        } else {
-          resolve({ kind: 'ok', affectedRows: affected, insertId: null, info: '', elapsedMs })
+        try {
+          if (first) {
+            if (additionalResults.length === 0) await this.addSources(text, first.fields)
+            resolve({ kind: 'rows', ...first, elapsedMs, additionalResults })
+          } else {
+            resolve({ kind: 'ok', affectedRows: affected, insertId: null, info: '', elapsedMs })
+          }
+        } finally {
+          this.current = null
         }
       }
       req.on('error', (err: Error) => {
+        finished = true
         this.current = null
         reject(err)
       })
       req.on('done', () => {
-        if (this.current === req) finish()
+        if (finished || this.current !== req) return
+        finished = true
+        void finish()
       })
       req.query(text)
     })
@@ -156,6 +164,36 @@ export class MssqlDriver implements Driver {
 
   async cancel(): Promise<void> {
     this.current?.cancel()
+  }
+
+  /**
+   * Names the table column behind each column of the batch's only result set.
+   * Tedious doesn't report column origins, so SQL Server describes the batch
+   * (browse mode resolves aliases and joins) on the session that ran it. Columns
+   * stay without a source when the batch can't be described, e.g. with temp tables.
+   */
+  private async addSources(batch: string, fields: ResultField[]): Promise<void> {
+    if (!this.editor) return
+    try {
+      const req = new sql.Request(this.editor)
+      req.arrayRowMode = false
+      req.input('batch', sql.NVarChar(sql.MAX), batch)
+      const r = await req.query<{ local: number | null; schema: string | null; table: string | null; column: string | null }>(
+        `SELECT CASE WHEN source_database = DB_NAME() THEN 1 ELSE 0 END AS local, source_schema AS [schema],
+                source_table AS [table], source_column AS [column]
+         FROM sys.dm_exec_describe_first_result_set(@batch, NULL, 1)
+         WHERE is_hidden = 0
+         ORDER BY column_ordinal`
+      )
+      const described = r.recordset
+      if (described.length !== fields.length) return
+      described.forEach((c, i) => {
+        // Only the connected database's tables can be looked up and edited.
+        if (c.local && c.schema && c.table && c.column) fields[i].source = { schema: c.schema, table: c.table, column: c.column }
+      })
+    } catch {
+      // Not describable: the result is just not editable.
+    }
   }
 
   async currentSchema(): Promise<string | null> {

@@ -13,7 +13,11 @@ type QueryHeader = Omit<ResultSetHeader, 'insertId'> & { insertId: number | stri
 
 function toField(f: FieldPacket): ResultField {
   const type = TYPE_NAMES[f.type ?? -1] ?? String(f.type)
-  return { name: f.name, type, numeric: NUMERIC_TYPES.has(type) }
+  const field: ResultField = { name: f.name, type, numeric: NUMERIC_TYPES.has(type) }
+  // Expressions come without an original table; derived tables and views report their own name.
+  const schema = f.db ?? f.schema
+  if (schema && f.orgTable && f.orgName) field.source = { schema, table: f.orgTable, column: f.orgName }
+  return field
 }
 
 function open(cfg: ServerConnectionConfig): Promise<Connection> {

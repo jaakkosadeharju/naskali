@@ -5,16 +5,11 @@
 // Protocol: the parent posts { id, op, ... } and gets back
 // { id, ok: true, value } or { id, ok: false, error }.
 import { parentPort } from 'node:worker_threads'
-import { constants, DatabaseSync, type StatementSync } from 'node:sqlite'
+import { constants, DatabaseSync } from 'node:sqlite'
 import { SPLIT_RULES, splitStatements } from '../../shared/sqlSplit'
+import { fieldsOf, type WorkerField } from './sqliteColumns'
 
 type Value = null | number | bigint | string | Uint8Array
-
-export interface WorkerField {
-  name: string
-  /** Declared column type, if the result column comes straight from a table column. */
-  type: string | null
-}
 
 export type WorkerRequest =
   | { id: number; op: 'open'; file: string; readOnly: boolean }
@@ -31,10 +26,6 @@ export type QueryReply =
 let db: DatabaseSync | null = null
 
 const bindable = (v: unknown): Value => (typeof v === 'boolean' ? (v ? 1 : 0) : (v as Value))
-
-function fieldsOf(stmt: StatementSync): WorkerField[] {
-  return stmt.columns().map((c) => ({ name: c.name, type: c.type ?? null }))
-}
 
 const SQLITE_TRIVIA = /^(?:[\t\n\f\r ;\uFEFF]+|--[^\n]*|\/\*(?:[^*]|\*(?!\/))*(?:\*\/|$))*/
 

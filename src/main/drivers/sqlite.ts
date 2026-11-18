@@ -6,7 +6,8 @@ import type { ConnectionInfo, QueryResult, ResultField, SchemaInfo, SqliteConnec
 import { DIALECTS, type Param } from '../dialect'
 import type { ColumnMeta } from '../tableQuery'
 import { MAX_ROWS, buildSchemaTree, groupForeignKeys, groupIndexes, normalise, type Driver, type Exec, type Rows } from './types'
-import type { QueryReply, WorkerField, WorkerRequest } from './sqliteWorker'
+import type { QueryReply, WorkerRequest } from './sqliteWorker'
+import type { WorkerField } from './sqliteColumns'
 
 /** A running sqliteWorker – as a worker thread or a child process. */
 export interface Endpoint {
@@ -90,15 +91,20 @@ class WorkerConnection {
 /** Declared types with numeric affinity (SQLite's rules, minus NUMERIC-affinity date types). */
 const NUMERIC_DECL = /INT|REAL|FLOA|DOUB|DEC|NUMERIC/i
 
-function toFields(fields: WorkerField[], rows: unknown[][]): ResultField[] {
+export function toFields(fields: WorkerField[], rows: unknown[][]): ResultField[] {
   return fields.map((f, i) => {
     // Expressions have no declared type: look at the values instead.
     const sample = f.type === null ? rows.find((r) => r[i] !== null)?.[i] : undefined
-    return {
+    const field: ResultField = {
       name: f.name,
       type: f.type ?? (sample === undefined ? '' : typeof sample === 'string' ? 'TEXT' : typeof sample === 'object' ? 'BLOB' : 'NUMERIC'),
       numeric: f.type !== null ? NUMERIC_DECL.test(f.type) : typeof sample === 'number' || typeof sample === 'bigint'
     }
+    // Schemas are SQLite database names (main, temp or an attachment).
+    if (f.source) field.source = { schema: f.source.database, table: f.source.table, column: f.source.column }
+    // NULL keys only make their own row read-only (e.g. the missing side of an outer join).
+    if (rows.some((r) => r[i] !== null && isUnsafeKeyValue(r[i]))) field.unsafeKey = true
+    return field
   })
 }
 
