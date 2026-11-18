@@ -55,12 +55,13 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
         </div>
       </div>
       <div className="tree-filter">
-        <input aria-label="Filter tables" placeholder={`Filter (${MOD}P: open table)`} value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <input aria-label="Filter database objects" placeholder={`Filter (${MOD}P: open table)`} value={filter} onChange={(e) => setFilter(e.target.value)} />
       </div>
       <ul>
         {schemas.map((s) => {
           const tables = f ? s.tables.filter((t) => t.name.toLowerCase().includes(f)) : s.tables
-          if (f && tables.length === 0) return null
+          const procedures = (s.procedures ?? []).filter((name) => name.toLowerCase().includes(f))
+          if (f && tables.length === 0 && procedures.length === 0) return null
           const isOpen = open.has(s.name) || !!f
           return (
             <li key={s.name}>
@@ -157,6 +158,16 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
                       </li>
                     )
                   })}
+                  {procedures.length > 0 && (
+                    <li>
+                      <div className="node procedure-heading">Stored procedures</div>
+                      <ul>
+                        {procedures.map((name) => (
+                          <li key={name} className="node procedure-node" title={`${s.name}.${name}`}>{name}</li>
+                        ))}
+                      </ul>
+                    </li>
+                  )}
                 </ul>
               )}
             </li>

@@ -1,5 +1,5 @@
 import sql from 'mssql'
-import type { CellValue, ConnectionInfo, QueryResult, ResultField, SchemaInfo, ServerConnectionConfig, TableDetails } from '../../shared/types'
+import type { ConnectionInfo, QueryResult, QueryResultSet, ResultField, SchemaInfo, ServerConnectionConfig, TableDetails } from '../../shared/types'
 import { DIALECTS, type Param } from '../dialect'
 import type { ColumnMeta } from '../tableQuery'
 import { MAX_ROWS, buildSchemaTree, generateDdl, groupForeignKeys, groupIndexes, normalise, type Driver, type Exec, type Rows } from './types'
@@ -110,26 +110,25 @@ export class MssqlDriver implements Driver {
     const started = performance.now()
 
     return new Promise<QueryResult>((resolve, reject) => {
-      let columns: Column[] | null = null
-      let readingFirstResultSet = false
-      const rows: CellValue[][] = []
-      let truncated = false
+      const resultSets: QueryResultSet[] = []
+      let current: QueryResultSet | undefined
+      let retainedRows = 0
       let affected = 0
-      let stopped = false // we cancelled after MAX_ROWS ourselves
 
-      req.on('recordset', (cols: Column[]) => {
-        // Batches can return several result sets; show the first.
-        readingFirstResultSet = columns === null
-        if (readingFirstResultSet) columns = cols
+      req.on('recordset', (columns: Column[]) => {
+        current = { fields: toFields(columns), rows: [], rowCount: 0, truncated: false }
+        resultSets.push(current)
       })
       req.on('row', (row: unknown[]) => {
-        if (stopped || !readingFirstResultSet) return
-        if (rows.length >= MAX_ROWS) {
-          truncated = stopped = true
-          req.cancel()
+        if (!current) return
+        // Keep the overall row budget while still reading later result sets.
+        current.rowCount = (current.rowCount ?? 0) + 1
+        if (retainedRows >= MAX_ROWS) {
+          current.truncated = true
           return
         }
-        rows.push(row.map(normalise))
+        current.rows.push(row.map(normalise))
+        retainedRows++
       })
       req.on('rowsaffected', (n: number) => {
         affected += n
@@ -137,14 +136,14 @@ export class MssqlDriver implements Driver {
       const finish = (): void => {
         this.current = null
         const elapsedMs = Math.round(performance.now() - started)
-        if (columns) {
-          resolve({ kind: 'rows', fields: toFields(columns), rows, rowCount: truncated ? null : rows.length, truncated, elapsedMs })
+        const [first, ...additionalResults] = resultSets
+        if (first) {
+          resolve({ kind: 'rows', ...first, elapsedMs, additionalResults })
         } else {
           resolve({ kind: 'ok', affectedRows: affected, insertId: null, info: '', elapsedMs })
         }
       }
-      req.on('error', (err: Error & { code?: string }) => {
-        if (stopped && err.code === 'ECANCEL') return // our own cut-off; 'done' follows
+      req.on('error', (err: Error) => {
         this.current = null
         reject(err)
       })
@@ -246,13 +245,25 @@ export class MssqlDriver implements Driver {
        WHERE o.type IN ('U', 'V') AND o.is_ms_shipped = 0 AND ${USER_SCHEMA}
        ORDER BY s.name, o.name, c.column_id`
     )
+    const procedures = await this.objects<{ schema: string; name: string }>(
+      `SELECT s.name AS [schema], p.name
+       FROM sys.procedures p JOIN sys.schemas s ON s.schema_id = p.schema_id
+       WHERE p.is_ms_shipped = 0 AND ${USER_SCHEMA}
+       ORDER BY s.name, p.name`
+    )
     // Keep dbo and schemas that have objects; hide empty role-like schemas.
-    const used = new Set(tables.map((t) => t.schema))
-    return buildSchemaTree(
+    const used = new Set([...tables, ...procedures].map((object) => object.schema))
+    const tree = buildSchemaTree(
       schemas.map((s) => s.name).filter((s) => s === 'dbo' || used.has(s)),
       tables,
       columns.map((c) => ({ ...c, type: formatType(c.type, c.maxLength, c.precision, c.scale), key: c.pk ? 'PRI' : '' }))
     )
+    const bySchema = new Map(tree.map((schema) => [schema.name, schema]))
+    for (const procedure of procedures) {
+      const schema = bySchema.get(procedure.schema)
+      if (schema) (schema.procedures ??= []).push(procedure.name)
+    }
+    return tree
   }
 
   async tableDetails(schema: string, table: string): Promise<TableDetails> {

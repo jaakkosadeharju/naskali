@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { monaco } from './monacoSetup'
 import { completionState } from './completion'
 import { ConnectDialog } from './components/ConnectDialog'
@@ -12,7 +12,7 @@ import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
 import { TablePalette } from './components/TablePalette'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
-import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo, type TableAction } from '../../shared/types'
+import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type QueryResultSet, type RowFilter, type SchemaInfo, type TableAction } from '../../shared/types'
 import { setEditorDialect } from './monacoSetup'
 import type { MenuCommand } from '../../shared/menuCommands'
 import { MenuActionsContext, type RegisterMenuAction } from './menuActions'
@@ -755,18 +755,7 @@ function ResultsPanel({ run, label }: { run: RunState; label: string }): JSX.Ele
       return <pre className="error-panel">{run.error}</pre>
     case 'done':
       if (run.result.kind === 'rows') {
-        const { fields, rows } = run.result
-        return (
-          <div className="query-results">
-            <div className="query-results-actions">
-              <h2 className="pane-heading">Results</h2>
-              <ExportRows fields={fields} rows={rows} name={label} />
-            </div>
-            <div className="table-body">
-              <ResultsGrid fields={fields} rows={rows} sourceLabel={label} />
-            </div>
-          </div>
-        )
+        return <QueryResults sets={[run.result, ...(run.result.additionalResults ?? [])]} label={label} />
       }
       return (
         <div className="placeholder">
@@ -778,9 +767,72 @@ function ResultsPanel({ run, label }: { run: RunState; label: string }): JSX.Ele
   }
 }
 
+function QueryResults({ sets, label }: { sets: QueryResultSet[]; label: string }): JSX.Element {
+  const [selected, setSelected] = useState(0)
+  const id = useId()
+  const multiple = sets.length > 1
+  const { fields, rows, rowCount, truncated } = sets[selected]
+  const source = multiple ? `${label} - Result ${selected + 1}` : label
+
+  return (
+    <div className="query-results">
+      <div className="query-results-actions">
+        {multiple ? (
+          <div className="result-set-tabs" role="tablist" aria-label="Result sets">
+            {sets.map((_, index) => (
+              <button
+                key={index}
+                id={`${id}-tab-${index}`}
+                type="button"
+                role="tab"
+                aria-selected={selected === index}
+                aria-controls={`${id}-panel`}
+                tabIndex={selected === index ? 0 : -1}
+                onClick={() => setSelected(index)}
+                onKeyDown={(event) => {
+                  let next: number
+                  switch (event.key) {
+                    case 'ArrowRight':
+                      next = (index + 1) % sets.length
+                      break
+                    case 'ArrowLeft':
+                      next = (index + sets.length - 1) % sets.length
+                      break
+                    case 'Home':
+                      next = 0
+                      break
+                    case 'End':
+                      next = sets.length - 1
+                      break
+                    default: return
+                  }
+                  event.preventDefault()
+                  setSelected(next)
+                  document.getElementById(`${id}-tab-${next}`)?.focus()
+                }}
+              >
+                Result {index + 1}
+              </button>
+            ))}
+          </div>
+        ) : <h2 className="pane-heading">Results</h2>}
+        {multiple && <span className={truncated ? 'warn' : 'muted'}>
+          {truncated ? `Showing ${rows.length.toLocaleString()} of ${rowCount?.toLocaleString()} rows` : `${rows.length.toLocaleString()} rows`}
+        </span>}
+        <ExportRows fields={fields} rows={rows} name={source} />
+      </div>
+      <div className="table-body" id={multiple ? `${id}-panel` : undefined}
+        role={multiple ? 'tabpanel' : undefined} aria-labelledby={multiple ? `${id}-tab-${selected}` : undefined}>
+        <ResultsGrid key={selected} fields={fields} rows={rows} sourceLabel={source} />
+      </div>
+    </div>
+  )
+}
+
 function StatusText({ run }: { run: RunState }): JSX.Element {
   if (run.status === 'done' && run.result.kind === 'rows') {
     const r = run.result
+    if (r.additionalResults?.length) return <span>{r.additionalResults.length + 1} result sets · {r.elapsedMs} ms</span>
     return (
       <span>
         {r.rowCount === null ? `${r.rows.length.toLocaleString()}+` : r.rowCount.toLocaleString()} rows · {r.elapsedMs} ms

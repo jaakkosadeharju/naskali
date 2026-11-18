@@ -101,6 +101,7 @@ export interface TableInfo {
 export interface SchemaInfo {
   name: string
   tables: TableInfo[]
+  procedures?: string[]
 }
 
 export interface ResultField {
@@ -114,16 +115,16 @@ export interface ResultField {
 export type CellValue = string | number | boolean | null
 export type ExportFormat = 'csv' | 'json'
 
+export interface QueryResultSet {
+  fields: ResultField[]
+  rows: CellValue[][]
+  /** Total rows produced; null when the result was cut off without counting the rest. */
+  rowCount: number | null
+  truncated: boolean
+}
+
 export type QueryResult =
-  | {
-      kind: 'rows'
-      fields: ResultField[]
-      rows: CellValue[][]
-      /** Total rows produced; null when the result was cut off without counting the rest. */
-      rowCount: number | null
-      truncated: boolean
-      elapsedMs: number
-    }
+  | (QueryResultSet & { kind: 'rows'; elapsedMs: number; additionalResults?: QueryResultSet[] })
   | {
       kind: 'ok'
       affectedRows: number | null

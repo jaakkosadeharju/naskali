@@ -1306,3 +1306,29 @@ button.danger {
   resize: vertical;
   white-space: pre;
 }
+
+.result-set-tabs {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  overflow-x: auto;
+}
+.result-set-tabs button {
+  flex: none;
+}
+.result-set-tabs [aria-selected='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.result-set-tabs [aria-selected='true']:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.node.procedure-heading {
+  font-weight: 650;
+  color: var(--muted);
+}
+.node.procedure-node {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
