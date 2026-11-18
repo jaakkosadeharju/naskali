@@ -182,10 +182,17 @@ export class MssqlDriver implements Driver {
     const tx = new sql.Transaction(this.requireMeta())
     await tx.begin()
     try {
-      // rowsAffected counts matched rows for UPDATE, also when values don't change.
+      // @@ROWCOUNT reports the edit's matched rows without adding writes from triggers.
       const result = await fn(async (text, params) => {
-        const r = await this.bind(new sql.Request(tx), params).query(text)
-        return r.rowsAffected.reduce((a, b) => a + b, 0)
+        const statement = text.replace(/;\s*$/, '')
+        const req = this.bind(new sql.Request(tx), params)
+        req.arrayRowMode = false
+        const r = await req.query<{ affected: number }>(`${statement};\nSELECT @@ROWCOUNT AS affected`)
+        // A trigger can return its own result sets before the count query.
+        const sets = r.recordsets as sql.IRecordSet<{ affected: number }>[]
+        const count = sets.at(-1)?.[0]?.affected
+        if (typeof count !== 'number') throw new Error('SQL Server did not return an affected-row count')
+        return count
       })
       await tx.commit()
       return result
