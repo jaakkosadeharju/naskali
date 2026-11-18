@@ -1332,3 +1332,8 @@ button.danger {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.query-results-actions > button,
+.query-results-actions .saved-msg {
+  flex-shrink: 0;
+  white-space: nowrap;
+}

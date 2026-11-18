@@ -200,6 +200,18 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
   // ---- Value inspector -------------------------------------------------------
   const inspector = useInspector()
   const gridId = useId()
+  const inspectorRef = useRef(inspector)
+  inspectorRef.current = inspector
+  // A grid that goes away (e.g. its query re-ran) must not leave its cell, with callbacks into it, in the panel.
+  useEffect(
+    () => () => {
+      const panel = inspectorRef.current
+      if (panel?.ownerRef.current !== gridId) return
+      panel.ownerRef.current = null
+      panel.show(null)
+    },
+    [gridId]
+  )
   const currentCell = selection.current?.cell
   const [curCol, curRow] = currentCell ?? [-1, -1]
 

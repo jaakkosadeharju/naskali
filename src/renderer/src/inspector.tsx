@@ -32,7 +32,8 @@ export interface InspectedValue {
 export interface InspectorApi {
   open: boolean
   setOpen: (open: boolean) => void
-  show: (v: InspectedValue) => void
+  /** null empties the panel. */
+  show: (v: InspectedValue | null) => void
   /** Id of the grid whose selection the panel follows. */
   ownerRef: MutableRefObject<string | null>
 }
