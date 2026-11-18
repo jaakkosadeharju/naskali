@@ -1,5 +1,5 @@
 import mysql, { type Connection, type ConnectionOptions, type FieldPacket, type ResultSetHeader } from 'mysql2'
-import type { CellValue, ConnectionInfo, QueryResult, ResultField, SchemaInfo, ServerConnectionConfig, TableDetails } from '../../shared/types'
+import type { ConnectionInfo, QueryResult, QueryResultSet, ResultField, SchemaInfo, ServerConnectionConfig, TableDetails } from '../../shared/types'
 import { DIALECTS, type Param } from '../dialect'
 import type { ColumnMeta } from '../tableQuery'
 import { MAX_ROWS, buildSchemaTree, groupForeignKeys, groupIndexes, normalise, type Driver, type Exec, type Rows } from './types'
@@ -114,9 +114,9 @@ export class MySqlDriver implements Driver {
     const started = performance.now()
 
     return new Promise<QueryResult>((resolve, reject) => {
-      let fields: FieldPacket[] | null = null
-      const rows: CellValue[][] = []
-      let rowCount = 0
+      const resultSets: QueryResultSet[] = []
+      let current: QueryResultSet | undefined
+      let retainedRows = 0
       let header: QueryHeader | null = null
       let failed = false
 
@@ -126,14 +126,20 @@ export class MySqlDriver implements Driver {
         this.running = false
         reject(err)
       })
-      q.on('fields', (f: FieldPacket[]) => {
-        // Statements like CALL can return several result sets; show the first.
-        if (!fields) fields = f
+      q.on('fields', (fields: FieldPacket[] | undefined) => {
+        // MySQL sends an OK packet without fields after a CALL.
+        if (!fields) return
+        current = { fields: fields.map(toField), rows: [], rowCount: 0, truncated: false }
+        resultSets.push(current)
       })
       q.on('result', (r: unknown) => {
         if (Array.isArray(r)) {
-          rowCount++
-          if (rows.length < MAX_ROWS) rows.push(r.map(normalise))
+          if (!current) return
+          current.rowCount = (current.rowCount ?? 0) + 1
+          if (retainedRows < MAX_ROWS) {
+            current.rows.push(r.map(normalise))
+            retainedRows++
+          } else current.truncated = true
         } else if (!header) {
           header = r as QueryHeader
         }
@@ -142,8 +148,9 @@ export class MySqlDriver implements Driver {
         if (failed) return
         this.running = false
         const elapsedMs = Math.round(performance.now() - started)
-        if (fields) {
-          resolve({ kind: 'rows', fields: fields.map(toField), rows, rowCount, truncated: rowCount > rows.length, elapsedMs })
+        const [first, ...additionalResults] = resultSets
+        if (first) {
+          resolve({ kind: 'rows', ...first, elapsedMs, additionalResults })
         } else {
           const h = header as QueryHeader | null
           const insertId = h?.insertId
