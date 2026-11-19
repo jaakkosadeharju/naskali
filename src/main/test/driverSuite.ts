@@ -32,6 +32,37 @@ export function driverSuite(name: string, create: () => Driver, { schema, q }: S
     const nameOf = async (table: string, id: number): Promise<unknown> =>
       (await select(`SELECT name FROM ${table} WHERE id = ${id}`)).rows[0]?.[0]
 
+    it('keeps editor writes on the session controlled by commit and rollback', async () => {
+      const mssql = driver.dialect.kind === 'mssql'
+      const table = `naskali_editor_tx_${process.pid}`
+      await driver.query(`CREATE ${mssql ? '' : 'TEMPORARY '}TABLE ${table} (id INT)`)
+      try {
+        await driver.beginEditorTransaction()
+        expect(await driver.editorTransactionStatus()).toBe('active')
+        await driver.query(`INSERT INTO ${table} VALUES (1)`)
+        expect((await select(`SELECT id FROM ${table}`)).rows).toEqual([[1]])
+        await driver.endEditorTransaction('rollback')
+        expect(await driver.editorTransactionStatus()).toBe('idle')
+        expect((await select(`SELECT id FROM ${table}`)).rows).toEqual([])
+
+        await driver.beginEditorTransaction()
+        await driver.query(`INSERT INTO ${table} VALUES (2)`)
+        await driver.endEditorTransaction('commit')
+        expect(await driver.editorTransactionStatus()).toBe('idle')
+        expect((await select(`SELECT id FROM ${table}`)).rows).toEqual([[2]])
+
+        if (driver.dialect.kind === 'postgres') {
+          await driver.beginEditorTransaction()
+          await expect(driver.query('SELECT no_such_column')).rejects.toThrow()
+          expect(await driver.editorTransactionStatus()).toBe('failed')
+          await driver.endEditorTransaction('rollback')
+        }
+      } finally {
+        if (await driver.editorTransactionStatus() !== 'idle') await driver.endEditorTransaction('rollback')
+        await driver.query(`DROP TABLE ${table}`)
+      }
+    })
+
     it('reports the table column of every selected column', async () => {
       const r = await select('SELECT * FROM customers WHERE id = 1')
       expect(r.fields.every((f) => f.source?.schema === schema && f.source.table === 'customers')).toBe(true)

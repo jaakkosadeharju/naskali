@@ -108,6 +108,11 @@ export interface SavedQuery {
   sql: string
 }
 
+export interface EditorTransactionState {
+  statements: number
+  rollbackOnly: boolean
+}
+
 export interface SchemaInfo {
   name: string
   tables: TableInfo[]
@@ -303,6 +308,7 @@ export interface SqlApi {
   exportRows(format: ExportFormat, name: string, columns: string[], rows: CellValue[][]): Promise<IpcResult<void>>
   cancel(tabId: string): Promise<IpcResult<void>>
   closeQueryTab(tabId: string): Promise<IpcResult<void>>
+  editorTransaction(tabId: string, action: 'begin' | 'commit' | 'rollback' | 'status'): Promise<IpcResult<EditorTransactionState | null>>
   useSchema(name: string): Promise<IpcResult<void>>
   /** Shows a file picker for a SQLite database; null when cancelled. */
   pickSqliteFile(): Promise<IpcResult<string | null>>

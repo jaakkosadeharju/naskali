@@ -18,6 +18,7 @@ export type WorkerRequest =
   | { id: number; op: 'exec'; sql: string; params: (Value | boolean)[] }
   | { id: number; op: 'script'; sql: string }
   | { id: number; op: 'close' }
+  | { id: number; op: 'transactionStatus' }
 
 export type QueryReply =
   | { kind: 'rows'; fields: WorkerField[]; rows: unknown[][]; truncated: boolean }
@@ -77,6 +78,8 @@ function handle(req: WorkerRequest): unknown {
   if (!db) throw new Error('Database is not open')
 
   switch (req.op) {
+    case 'transactionStatus':
+      return db.isTransaction
     case 'query': {
       const { stmt, action } = prepareEditorQuery(db, req.sql)
       if (stmt.columns().length === 0) {

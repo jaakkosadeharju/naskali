@@ -179,6 +179,11 @@ handle('db:exportRows', async (format: ExportFormat, name: string, columns: stri
 })
 handle('db:cancel', async (tabId: string) => querySessions?.cancel(tabId))
 handle('db:closeQueryTab', async (tabId: string) => querySessions?.close(tabId))
+handle('db:editorTransaction', async (tabId: string, action: 'begin' | 'commit' | 'rollback' | 'status') => {
+  if (!querySessions) throw new Error('Not connected')
+  if (!['begin', 'commit', 'rollback', 'status'].includes(action)) throw new Error('Invalid transaction action')
+  return querySessions.transaction(tabId, action)
+})
 handle('db:use', async (name: string) => {
   await requireDriver().useSchema(name)
   querySessions?.useSchema(name)

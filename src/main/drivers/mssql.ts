@@ -49,6 +49,7 @@ export class MssqlDriver implements Driver {
   private editor: sql.ConnectionPool | null = null
   private meta: sql.ConnectionPool | null = null
   private current: sql.Request | null = null
+  private editorTransaction: sql.Transaction | null = null
 
   constructor(private readonly cfg: ServerConnectionConfig) {}
 
@@ -91,6 +92,8 @@ export class MssqlDriver implements Driver {
   }
 
   async disconnect(): Promise<void> {
+    await this.editorTransaction?.rollback().catch(() => {})
+    this.editorTransaction = null
     await Promise.all([this.editor?.close().catch(() => undefined), this.meta?.close().catch(() => undefined)])
     this.editor = this.meta = null
     this.current = null
@@ -104,7 +107,7 @@ export class MssqlDriver implements Driver {
   query(text: string): Promise<QueryResult> {
     if (!this.editor) return Promise.reject(new Error('Not connected'))
     if (this.current) return Promise.reject(new Error('A query is already running'))
-    const req = new sql.Request(this.editor)
+    const req = (this.editorTransaction ?? this.editor).request()
     req.stream = true
     req.arrayRowMode = true
     this.current = req
@@ -176,7 +179,7 @@ export class MssqlDriver implements Driver {
   private async addSources(batch: string, fields: ResultField[]): Promise<void> {
     if (!this.editor) return
     try {
-      const req = new sql.Request(this.editor)
+      const req = (this.editorTransaction ?? this.editor).request()
       req.arrayRowMode = false
       req.input('batch', sql.NVarChar(sql.MAX), batch)
       const r = await req.query<{ local: number | null; schema: string | null; table: string | null; column: string | null }>(
@@ -195,6 +198,54 @@ export class MssqlDriver implements Driver {
     } catch {
       // Not describable: the result is just not editable.
     }
+  }
+
+  private async transactionState(connection: sql.Transaction | sql.ConnectionPool): Promise<{ state: number; depth: number }> {
+    const req = connection.request()
+    req.arrayRowMode = false
+    return (await req.query<{ state: number; depth: number }>('SELECT XACT_STATE() AS state, @@TRANCOUNT AS depth')).recordset[0]
+  }
+
+  async beginEditorTransaction(): Promise<void> {
+    if (!this.editor) throw new Error('Not connected')
+    if ((await this.transactionState(this.editor)).state) throw new Error('End the existing SQL transaction first')
+    const transaction = new sql.Transaction(this.editor)
+    await transaction.begin()
+    this.editorTransaction = transaction
+    transaction.on('rollback', () => {
+      if (this.editorTransaction === transaction) this.editorTransaction = null
+    })
+  }
+
+  async endEditorTransaction(action: 'commit' | 'rollback'): Promise<void> {
+    const transaction = this.editorTransaction
+    if (!transaction) throw new Error('The transaction has already ended')
+    try {
+      if (action === 'commit') await transaction.commit()
+      else await transaction.rollback()
+    } catch (error) {
+      // A failed finish can leave server-side state on the released connection.
+      const pool = this.editor
+      this.editor = null
+      await pool?.close().catch(() => {})
+      this.editor = await this.pool(1, 0).connect().catch(() => null)
+      throw error
+    } finally {
+      // node-mssql releases the pinned connection even when the server rejects the request.
+      this.editorTransaction = null
+    }
+  }
+
+  async editorTransactionStatus(): Promise<'active' | 'idle' | 'failed'> {
+    const transaction = this.editorTransaction
+    if (!transaction) return 'idle'
+    const { state, depth } = await this.transactionState(transaction)
+    if (state === 0) {
+      await transaction.rollback().catch(() => {})
+      this.editorTransaction = null
+      return 'idle'
+    }
+    return state === -1 || depth !== 1 ? 'failed' : 'active'
   }
 
   async currentSchema(): Promise<string | null> {

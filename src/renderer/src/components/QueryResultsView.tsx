@@ -11,6 +11,7 @@ interface Props {
   /** The SQL that produced the result. */
   sql: string
   label: string
+  readOnly?: boolean
   /** Shown once, e.g. after the query re-ran to show saved edits. */
   notice?: string
   /** Runs `sql` again after edits were saved, keeping `notice` on the new result. */
@@ -21,7 +22,7 @@ interface Props {
 }
 
 /** A query's result sets, as tabs when there are several. A single result set can be edited. */
-export function QueryResultsView({ sets, sql, label, notice, onRerun, onDirtyChange, onOpenSql }: Props): JSX.Element {
+export function QueryResultsView({ sets, sql, label, readOnly, notice, onRerun, onDirtyChange, onOpenSql }: Props): JSX.Element {
   const [selected, setSelected] = useState(0)
   const id = useId()
   const multiple = sets.length > 1
@@ -29,7 +30,7 @@ export function QueryResultsView({ sets, sql, label, notice, onRerun, onDirtyCha
   const source = multiple ? `${label} - Result ${selected + 1}` : label
 
   if (!multiple) {
-    return <EditableResult set={set} sql={sql} label={label} notice={notice} onRerun={onRerun} onDirtyChange={onDirtyChange} onOpenSql={onOpenSql} />
+    return <EditableResult set={set} sql={sql} label={label} readOnly={readOnly} notice={notice} onRerun={onRerun} onDirtyChange={onDirtyChange} onOpenSql={onOpenSql} />
   }
   return (
     <div className="query-results">
@@ -89,7 +90,7 @@ const NO_TARGETS: ResultEditInfo['tables'] = []
  * A single result set; its columns read straight from tables can be edited when
  * the main process finds each table's primary key in the result.
  */
-function EditableResult({ set, sql, label, notice, onRerun, onDirtyChange, onOpenSql }: Omit<Props, 'sets'> & { set: QueryResultSet }): JSX.Element {
+function EditableResult({ set, sql, label, readOnly, notice, onRerun, onDirtyChange, onOpenSql }: Omit<Props, 'sets'> & { set: QueryResultSet }): JSX.Element {
   const { fields, rows } = set
   const [info, setInfo] = useState<ResultEditInfo | null>(null)
   const [selectedRows, setSelectedRows] = useState<number[]>([])
@@ -100,7 +101,7 @@ function EditableResult({ set, sql, label, notice, onRerun, onDirtyChange, onOpe
 
   // Only results with table columns are worth asking about (not `SELECT 1`).
   useEffect(() => {
-    if (!fields.some((f) => f.source)) return
+    if (readOnly || !fields.some((f) => f.source)) return
     let current = true
     void window.api.resultEditInfo(sql, fields).then((r) => {
       if (current && r.ok) setInfo(r.value)
@@ -108,9 +109,9 @@ function EditableResult({ set, sql, label, notice, onRerun, onDirtyChange, onOpe
     return () => {
       current = false
     }
-  }, [sql, fields])
+  }, [sql, fields, readOnly])
 
-  const targets = info?.tables ?? NO_TARGETS
+  const targets = readOnly ? NO_TARGETS : info?.tables ?? NO_TARGETS
   const singleTable = targets.length === 1
   const touch = useCallback((): void => {
     setSavedMsg(null)

@@ -84,3 +84,28 @@ it('applies a database selection once on both existing and new sessions', async 
   expect(left.useSchema.mock.calls).toEqual([['other']])
   expect(right.useSchema.mock.calls).toEqual([['other']])
 })
+
+it('counts successful statements in a tab and requires rollback after a failed transaction', async () => {
+  const driver = editor()
+  let status: 'idle' | 'active' | 'failed' = 'idle'
+  driver.editorTransactionStatus = async () => status
+  driver.beginEditorTransaction = async () => { status = 'active' }
+  const finish = vi.fn(async () => { status = 'idle' })
+  driver.endEditorTransaction = finish
+  const sessions = new QuerySessions(() => driver)
+
+  expect(await sessions.transaction('tab', 'begin')).toEqual({ statements: 0, rollbackOnly: false })
+  await sessions.query('tab', 'SELECT 1')
+  await expect(sessions.query('tab', '-- comment\nCOMMIT')).rejects.toThrow('Use the transaction controls')
+  await expect(sessions.query('tab', 'DROP TABLE orders')).rejects.toThrow('commit implicitly')
+  driver.query.mockImplementationOnce(async () => {
+    status = 'failed'
+    throw new Error('Statement failed')
+  })
+  await expect(sessions.query('tab', 'SELECT invalid')).rejects.toThrow('Statement failed')
+  expect(await sessions.transaction('tab', 'status')).toEqual({ statements: 1, rollbackOnly: true })
+  expect(await sessions.transaction('other-tab', 'status')).toBeNull()
+  await expect(sessions.transaction('tab', 'commit')).rejects.toThrow('must be rolled back')
+  expect(await sessions.transaction('tab', 'rollback')).toBeNull()
+  expect(finish).toHaveBeenCalledExactlyOnceWith('rollback')
+})

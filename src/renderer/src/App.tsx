@@ -12,7 +12,7 @@ import { ValueInspector } from './components/ValueInspector'
 import { TablePalette } from './components/TablePalette'
 import { SaveQueryDialog } from './components/SaveQueryDialog'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
-import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SavedQuery, type SchemaInfo, type TableAction } from '../../shared/types'
+import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type EditorTransactionState, type QueryResult, type RowFilter, type SavedQuery, type SchemaInfo, type TableAction } from '../../shared/types'
 import { setEditorDialect } from './monacoSetup'
 import type { MenuCommand } from '../../shared/menuCommands'
 import { MenuActionsContext, type RegisterMenuAction } from './menuActions'
@@ -39,12 +39,12 @@ type RunState =
   | { status: 'idle' }
   | { status: 'running'; sql: string; startedAt: number }
   /** `id` tells runs apart (a new one resets staged edits); `notice` is shown with the result. */
-  | { status: 'done'; sql: string; result: QueryResult; id: number; notice?: string }
+  | { status: 'done'; sql: string; result: QueryResult; id: number; notice?: string; transactional?: boolean }
   | { status: 'error'; sql: string; error: string }
 
 let runCounter = 0
 
-type QueryTab = Extract<WorkspaceTab, { kind: 'query' }> & { run: RunState; selectOnMount?: boolean }
+type QueryTab = Extract<WorkspaceTab, { kind: 'query' }> & { run: RunState; selectOnMount?: boolean; transaction?: EditorTransactionState | null; transactionBusy?: boolean; transactionMessage?: string }
 type Tab = QueryTab | Extract<WorkspaceTab, { kind: 'table' }>
 
 interface TabDrag {
@@ -275,6 +275,8 @@ export function App(): JSX.Element {
   const disconnect = async (): Promise<void> => {
     if (runningQueries.current.size || disconnecting || switchingDatabase) return
     if (dirtyTabs.current.size > 0 && !window.confirm('Some tabs have unsaved changes. Discard them and disconnect?')) return
+    if (tabs.some((tab) => tab.kind === 'query' && tab.transaction) &&
+      !window.confirm('Roll back open transactions and disconnect?')) return
     setDisconnecting(true)
     setProcedureError(null)
     await window.api.disconnect()
@@ -307,6 +309,10 @@ export function App(): JSX.Element {
   /** Runs `sql` in query tab `id`; `notice` is shown with its result (e.g. after saving edits). */
   const runSql = async (id: string, sql: string, notice?: string): Promise<void> => {
     if (!canExecute() || runningQueries.current.has(id)) return
+    const tab = tabs.find((item): item is QueryTab => item.id === id && item.kind === 'query')
+    const transactional = !!tab?.transaction
+    if (tab?.transaction?.rollbackOnly) return
+    if (transactional) patchTransaction(id, { transactionMessage: undefined })
     dirtyTabs.current.delete(id)
     const setRun = (run: RunState): void => {
       setTabs((ts) => ts.map((t) => t.kind === 'query' && t.id === id ? { ...t, run } : t))
@@ -319,20 +325,67 @@ export function App(): JSX.Element {
         setRun({ status: 'error', sql, error: r.error })
         return
       }
-      setRun({ status: 'done', sql, result: r.value.result, id: ++runCounter, notice })
+      setRun({ status: 'done', sql, result: r.value.result, id: ++runCounter, notice, transactional })
       querySchemas.current.set(id, r.value.schema)
       if (lastQueryId.current === id) updateDb(r.value.schema)
       // DDL changes the schema; keep the tree and autocomplete in sync.
-      if (/^\s*(create|alter|drop|rename|truncate)\b/i.test(sql)) void refreshSchema()
+      if (!transactional && /^\s*(create|alter|drop|rename|truncate)\b/i.test(sql)) void refreshSchema()
     } catch (error) {
       setRun({ status: 'error', sql, error: error instanceof Error ? error.message : String(error) })
     } finally {
+      if (transactional) {
+        const status = await window.api.editorTransaction(id, 'status').catch(() => null)
+        if (status?.ok) {
+          patchTransaction(id, {
+            transaction: status.value,
+            transactionMessage: status.value ? undefined : 'Transaction ended on the server.'
+          })
+          if (!status.value) void refreshSchema()
+        } else {
+          patchTransaction(id, {
+            transaction: { statements: tab?.transaction?.statements ?? 0, rollbackOnly: true },
+            transactionMessage: 'Could not check the transaction status.'
+          })
+        }
+      }
       runningQueries.current.delete(id)
     }
   }
 
+  const patchTransaction = (id: string, patch: Partial<Pick<QueryTab, 'transaction' | 'transactionBusy' | 'transactionMessage'>>): void => {
+    setTabs((current) => current.map((tab) => tab.kind === 'query' && tab.id === id ? { ...tab, ...patch } : tab))
+  }
+
+  const changeTransaction = async (tab: QueryTab, action: 'begin' | 'commit' | 'rollback'): Promise<void> => {
+    if (!canExecute() || runningQueries.current.has(tab.id)) return
+    if (action === 'begin' && dirtyTabs.current.has(tab.id)) {
+      patchTransaction(tab.id, { transactionMessage: 'Save or discard pending result edits before starting a transaction.' })
+      return
+    }
+    runningQueries.current.add(tab.id)
+    patchTransaction(tab.id, { transactionBusy: true, transactionMessage: undefined })
+    try {
+      const result = await window.api.editorTransaction(tab.id, action)
+      if (result.ok) {
+        patchTransaction(tab.id, {
+          transaction: result.value,
+          transactionMessage: action === 'commit' ? 'Transaction committed.' : action === 'rollback' ? 'Transaction rolled back.' : undefined
+        })
+        if (action !== 'begin') void refreshSchema()
+      } else {
+        const status = await window.api.editorTransaction(tab.id, 'status')
+        patchTransaction(tab.id, { transaction: status.ok ? status.value : tab.transaction, transactionMessage: result.error })
+      }
+    } catch (error) {
+      patchTransaction(tab.id, { transactionMessage: error instanceof Error ? error.message : String(error) })
+    } finally {
+      runningQueries.current.delete(tab.id)
+      patchTransaction(tab.id, { transactionBusy: false })
+    }
+  }
+
   const useSchema = async (name: string): Promise<void> => {
-    if (!conn?.info.capabilities.switchSchema || !canExecute() || runningQueries.current.size || name === currentDb) return
+    if (!conn?.info.capabilities.switchSchema || !canExecute() || runningQueries.current.size || hasOpenTransaction || name === currentDb) return
     setSwitchingDatabase(true)
     setDatabaseError(null)
     try {
@@ -451,6 +504,7 @@ export function App(): JSX.Element {
     if (!tab) return
     const name = tab.kind === 'table' ? tab.table : `Query ${tab.number} results`
     if (dirtyTabs.current.has(id) && !window.confirm(`Discard unsaved changes to ${name}?`)) return
+    if (tab.kind === 'query' && tab.transaction && !window.confirm('Roll back the transaction and close this tab?')) return
     dirtyTabs.current.delete(id)
     recentTabIds.current = recentTabIds.current.filter((recent) => recent !== id)
     editors.current.delete(id)
@@ -542,7 +596,8 @@ export function App(): JSX.Element {
   }
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? FIRST_QUERY
-  const queryRunning = tabs.some((t) => t.kind === 'query' && t.run.status === 'running')
+  const queryRunning = tabs.some((t) => t.kind === 'query' && (t.run.status === 'running' || t.transactionBusy))
+  const hasOpenTransaction = tabs.some((t) => t.kind === 'query' && t.transaction)
 
   const scopedActions = useRef(new Map<MenuCommand, (command: MenuCommand) => void>())
   const [scopedCommands, setScopedCommands] = useState<MenuCommand[]>([])
@@ -634,7 +689,10 @@ export function App(): JSX.Element {
   }
   const menuScope = workspaceInteractive ? registerMenuAction : null
   const activeQueryRunning = activeTab.kind === 'query' && activeTab.run.status === 'running'
-  const canRun = workspaceInteractive && !activeQueryRunning && activeTab.kind === 'query'
+  const activeTransaction = activeTab.kind === 'query' ? activeTab.transaction : null
+  const transactionMessage = activeTab.kind === 'query' ? activeTab.transactionMessage : undefined
+  const canControlTransaction = workspaceInteractive && !activeQueryRunning && activeTab.kind === 'query' && !activeTab.transactionBusy
+  const canRun = canControlTransaction && !activeTransaction?.rollbackOnly
   const canDisconnect = workspaceInteractive && !queryRunning
   const queryEditor = workspaceInteractive && activeTab.kind === 'query'
   const activeSavedQueryId = activeTab.kind === 'query' ? activeTab.savedQueryId : undefined
@@ -788,6 +846,25 @@ export function App(): JSX.Element {
           <button onClick={() => void window.api.cancel(activeTab.id)} disabled={!activeQueryRunning}>
             ■ Cancel
           </button>
+          {activeTab.kind === 'query' && conn && !activeTransaction && (
+            <button
+              type="button"
+              disabled={!canControlTransaction}
+              onClick={() => void changeTransaction(activeTab, 'begin')}
+            >
+              Manual transaction
+            </button>
+          )}
+          {activeTransaction && activeTab.kind === 'query' && (
+            <div className="transaction-actions" role="group" aria-label="Editor transaction">
+              <button className="transaction-commit" type="button" disabled={!canControlTransaction || activeTransaction.rollbackOnly} onClick={() => void changeTransaction(activeTab, 'commit')}>Commit</button>
+              <button className="transaction-rollback" type="button" disabled={!canControlTransaction} onClick={() => void changeTransaction(activeTab, 'rollback')}>Rollback</button>
+              <span className="muted">
+                {activeTransaction.statements} {activeTransaction.statements === 1 ? 'statement' : 'statements'}
+                {activeTransaction.rollbackOnly ? ' · Rollback required' : ''}
+              </span>
+            </div>
+          )}
           <div className="spacer" />
           <button
             aria-pressed={inspectorOpen}
@@ -807,7 +884,7 @@ export function App(): JSX.Element {
             currentDb={currentDb}
             databaseNames={databaseNames}
             databaseError={databaseError}
-            onUseDatabase={workspaceInteractive && !queryRunning && conn?.info.capabilities.switchSchema ? useSchema : undefined}
+            onUseDatabase={workspaceInteractive && !queryRunning && !hasOpenTransaction && conn?.info.capabilities.switchSchema ? useSchema : undefined}
             onInsert={insertText}
             onOpenTable={openTable}
             onProcedureMenu={workspaceInteractive ? openProcedureMenu : undefined}
@@ -910,13 +987,14 @@ export function App(): JSX.Element {
                   ))}
                   onMount={(editor) => editors.current.set(t.id, editor)}
                   onRun={(statementOnly) => execute(t.id, statementOnly)}
-                  runDisabled={!workspaceInteractive || t.run.status === 'running'}
+                  runDisabled={!workspaceInteractive || t.run.status === 'running' || !!t.transactionBusy || !!t.transaction?.rollbackOnly}
                 />
               }
               results={
                 <MenuActionsContext.Provider value={t.id === activeId ? menuScope : null}>
                   <ResultsPanel
                     run={t.run}
+                    readOnly={!!t.transaction}
                     label={queryName(t)}
                     onRerun={(sql, notice) => void runSql(t.id, sql, notice)}
                     onDirtyChange={(dirty) => {
@@ -967,6 +1045,7 @@ export function App(): JSX.Element {
           <div className="workspace-status">
             {activeTab.kind === 'query' ? <StatusText run={activeTab.run} /> : <span>{activeTab.schema}.{activeTab.table}</span>}
           </div>
+          {transactionMessage && <span className="workspace-status" role="status" title={transactionMessage}>{transactionMessage}</span>}
           {conn ? (
             <div className="conn-label" title={`${conn.label} · ${currentDb ?? 'No schema'} · ${DRIVER_LABELS[conn.info.driver]} ${conn.info.serverVersion}`}>
               <strong>{conn.label}</strong>
@@ -1027,13 +1106,14 @@ export function App(): JSX.Element {
 
 interface ResultsPanelProps {
   run: RunState
+  readOnly: boolean
   label: string
   onRerun: (sql: string, notice: string) => void
   onDirtyChange: (dirty: boolean) => void
   onOpenSql: (sql: string) => void
 }
 
-function ResultsPanel({ run, label, onRerun, onDirtyChange, onOpenSql }: ResultsPanelProps): JSX.Element {
+function ResultsPanel({ run, readOnly, label, onRerun, onDirtyChange, onOpenSql }: ResultsPanelProps): JSX.Element {
   switch (run.status) {
     case 'idle':
       return <div className="placeholder">Run a query with Ctrl+Enter</div>
@@ -1048,6 +1128,7 @@ function ResultsPanel({ run, label, onRerun, onDirtyChange, onOpenSql }: Results
             key={run.id}
             sets={[run.result, ...(run.result.additionalResults ?? [])]}
             sql={run.sql}
+            readOnly={readOnly || run.transactional}
             label={label}
             notice={run.notice}
             onRerun={(notice) => onRerun(run.sql, notice)}

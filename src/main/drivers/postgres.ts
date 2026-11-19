@@ -182,6 +182,21 @@ export class PostgresDriver implements Driver {
     await this.requireMeta().query('SELECT pg_cancel_backend($1)', [pid])
   }
 
+  async beginEditorTransaction(): Promise<void> {
+    await this.requireEditor().query('BEGIN')
+  }
+
+  async endEditorTransaction(action: 'commit' | 'rollback'): Promise<void> {
+    await this.requireEditor().query(action === 'commit' ? 'COMMIT' : 'ROLLBACK')
+  }
+
+  async editorTransactionStatus(): Promise<'active' | 'idle' | 'failed'> {
+    const status = this.requireEditor().getTransactionStatus()
+    if (status === 'T') return 'active'
+    if (status === 'I') return 'idle'
+    return 'failed'
+  }
+
   async currentSchema(): Promise<string | null> {
     return (await this.requireEditor().query<{ s: string | null }>('SELECT current_schema() AS s')).rows[0].s
   }

@@ -509,6 +509,31 @@ select {
 .statusbar .warn {
   color: #ffe08a;
 }
+.transaction-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.transaction-actions > span {
+  font-size: 12px;
+}
+button.transaction-commit {
+  color: #a7ebc2;
+  border-color: #347c53;
+  background: #214c35;
+}
+button.transaction-commit:hover:not(:disabled) {
+  background: #2a6244;
+}
+button.transaction-rollback {
+  color: #ffc1c6;
+  border-color: #a2545d;
+  background: #5d3038;
+}
+button.transaction-rollback:hover:not(:disabled) {
+  background: #783c46;
+}
 .workspace-status {
   min-width: 0;
   overflow: hidden;

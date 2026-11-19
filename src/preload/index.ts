@@ -26,6 +26,7 @@ const api: SqlApi = {
   exportRows: (format, name, columns, rows) => ipcRenderer.invoke('db:exportRows', format, name, columns, rows),
   cancel: (tabId) => ipcRenderer.invoke('db:cancel', tabId),
   closeQueryTab: (tabId) => ipcRenderer.invoke('db:closeQueryTab', tabId),
+  editorTransaction: (tabId, action) => ipcRenderer.invoke('db:editorTransaction', tabId, action),
   useSchema: (name) => ipcRenderer.invoke('db:use', name),
   pickSqliteFile: () => ipcRenderer.invoke('db:pickSqliteFile'),
   explorerMenu: (target, options) => ipcRenderer.invoke('db:explorerMenu', target, options),

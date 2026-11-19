@@ -14,6 +14,7 @@ export interface Rows {
 
 /** Runs one statement inside a transaction; resolves to the number of affected (matched) rows. */
 export type Exec = (sql: string, params: Param[]) => Promise<number>
+export type TransactionStatus = 'idle' | 'active' | 'failed'
 
 /**
  * One connected database. Drivers normalize their catalogs to the app's
@@ -33,6 +34,9 @@ export interface Driver {
   query(sql: string): Promise<QueryResult>
   /** Cancels the running editor query, if any. */
   cancel(): Promise<void>
+  beginEditorTransaction(): Promise<void>
+  endEditorTransaction(action: 'commit' | 'rollback'): Promise<void>
+  editorTransactionStatus(): Promise<TransactionStatus>
   currentSchema(): Promise<string | null>
   /** Only when `capabilities.switchSchema`. */
   useSchema(name: string): Promise<void>

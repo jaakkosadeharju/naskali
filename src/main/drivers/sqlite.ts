@@ -222,6 +222,19 @@ export class SqliteDriver implements Driver {
     await next
   }
 
+  async beginEditorTransaction(): Promise<void> {
+    await this.query('BEGIN')
+  }
+
+  async endEditorTransaction(action: 'commit' | 'rollback'): Promise<void> {
+    await this.query(action === 'commit' ? 'COMMIT' : 'ROLLBACK')
+  }
+
+  async editorTransactionStatus(): Promise<'active' | 'idle'> {
+    if (!this.editor) throw new Error('Not connected')
+    return await (await this.editor).call<boolean>({ op: 'transactionStatus' }) ? 'active' : 'idle'
+  }
+
   async currentSchema(): Promise<string | null> {
     return 'main'
   }

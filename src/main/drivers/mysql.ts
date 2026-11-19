@@ -106,6 +106,20 @@ export class MySqlDriver implements Driver {
     await run(this.requireEditor(), `USE ${this.dialect.quote(name)}`)
   }
 
+  async beginEditorTransaction(): Promise<void> {
+    await run(this.requireEditor(), 'START TRANSACTION')
+  }
+
+  async endEditorTransaction(action: 'commit' | 'rollback'): Promise<void> {
+    await run(this.requireEditor(), action === 'commit' ? 'COMMIT AND NO CHAIN NO RELEASE' : 'ROLLBACK AND NO CHAIN NO RELEASE')
+  }
+
+  async editorTransactionStatus(): Promise<'active' | 'idle'> {
+    // The OK packet reports the actual transaction state, including implicit commits.
+    const result = await run<ResultSetHeader>(this.requireEditor(), 'DO 0')
+    return (result.serverStatus & 1) !== 0 ? 'active' : 'idle'
+  }
+
   async currentSchema(): Promise<string | null> {
     const [row] = await run<{ db: string | null }[]>(this.requireEditor(), 'SELECT DATABASE() AS db')
     return row.db
