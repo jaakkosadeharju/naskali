@@ -90,7 +90,11 @@ export type TableAction =
   | { kind: 'dropColumn'; schema: string; table: string; column: string }
   | { kind: 'drop' | 'truncate'; schema: string; table: string }
 
-export type ExplorerMenuAction = 'new' | 'edit' | 'drop' | 'truncate' | 'procedure-create' | 'procedure-exec'
+export type ExplorerMenuAction = 'new' | 'edit' | 'drop' | 'truncate' | 'procedure-create' | 'procedure-exec' | 'toggle-favourite'
+export interface TableMenuOptions {
+  favourite: boolean
+  canChange: boolean
+}
 
 export interface TableInfo {
   name: string
@@ -98,10 +102,17 @@ export interface TableInfo {
   columns: ColumnInfo[]
 }
 
+export interface SavedQuery {
+  id: string
+  name: string
+  sql: string
+}
+
 export interface SchemaInfo {
   name: string
   tables: TableInfo[]
   procedures?: string[]
+  functions?: string[]
 }
 
 /** The table column a result column was read from, as the driver reports it. */
@@ -281,6 +292,11 @@ export interface SqlApi {
   listConnections(): Promise<IpcResult<SavedConnection[]>>
   saveConnection(id: string | null, name: string, config: ConnectionConfig, color: ConnectionColor): Promise<IpcResult<SavedConnection[]>>
   deleteConnection(id: string): Promise<IpcResult<SavedConnection[]>>
+  loadFavourites(identity: string, legacy: string[]): Promise<IpcResult<string[]>>
+  setFavourite(identity: string, table: string, favourite: boolean): Promise<IpcResult<string[]>>
+  loadSavedQueries(identity: string, legacy: SavedQuery[]): Promise<IpcResult<SavedQuery[]>>
+  saveQuery(identity: string, query: SavedQuery): Promise<IpcResult<SavedQuery[]>>
+  deleteSavedQuery(identity: string, id: string): Promise<IpcResult<SavedQuery[]>>
   introspect(): Promise<IpcResult<SchemaInfo[]>>
   /** Also returns the session's current schema, since the SQL may have run `USE …` / `SET search_path …`. */
   query(tabId: string, sql: string): Promise<IpcResult<{ result: QueryResult; schema: string | null }>>
@@ -290,7 +306,7 @@ export interface SqlApi {
   useSchema(name: string): Promise<IpcResult<void>>
   /** Shows a file picker for a SQLite database; null when cancelled. */
   pickSqliteFile(): Promise<IpcResult<string | null>>
-  explorerMenu(target: 'schema' | 'table' | 'procedure'): Promise<IpcResult<ExplorerMenuAction | null>>
+  explorerMenu(target: 'schema' | 'table' | 'procedure', options?: TableMenuOptions): Promise<IpcResult<ExplorerMenuAction | null>>
   previewCreateTable(action: CreateTableAction): Promise<IpcResult<string>>
   changeTable(action: TableAction): Promise<IpcResult<void>>
   procedureCall(schema: string, name: string): Promise<IpcResult<string>>

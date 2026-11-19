@@ -4,7 +4,7 @@ export const COPY_COMMANDS = ['copy-csv', 'copy-json', 'copy-json-with-headers']
 export type MenuCommand =
   | typeof EXPORT_COMMANDS[number]
   | typeof COPY_COMMANDS[number]
-  | 'new-query' | 'close-tab'
+  | 'new-query' | 'save-query' | 'close-tab'
   | 'connect' | 'disconnect' | 'refresh-schema'
   | 'run-query' | 'cancel-query'
   | 'toggle-line-comment' | 'toggle-block-comment'

@@ -297,12 +297,19 @@ export class MssqlDriver implements Driver {
        WHERE p.is_ms_shipped = 0 AND ${USER_SCHEMA}
        ORDER BY s.name, p.name`
     )
+    const functions = await this.objects<{ schema: string; name: string }>(
+      `SELECT s.name AS [schema], o.name
+       FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id
+       WHERE o.type IN ('FN', 'IF', 'TF', 'FS', 'FT') AND o.is_ms_shipped = 0 AND ${USER_SCHEMA}
+       ORDER BY s.name, o.name`
+    )
     // Keep dbo and schemas that have objects; hide empty role-like schemas.
-    const used = new Set([...tables, ...procedures].map((object) => object.schema))
+    const used = new Set([...tables, ...procedures, ...functions].map((object) => object.schema))
     const tree = buildSchemaTree(
       schemas.map((s) => s.name).filter((s) => s === 'dbo' || used.has(s)),
       tables,
-      columns.map((c) => ({ ...c, type: formatType(c.type, c.maxLength, c.precision, c.scale), key: c.pk ? 'PRI' : '' }))
+      columns.map((c) => ({ ...c, type: formatType(c.type, c.maxLength, c.precision, c.scale), key: c.pk ? 'PRI' : '' })),
+      functions
     )
     const bySchema = new Map(tree.map((schema) => [schema.name, schema]))
     for (const procedure of procedures) {

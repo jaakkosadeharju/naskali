@@ -10,6 +10,10 @@ state=$(sqlcmd -h -1 -W -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('shop') IS NU
 if [ "$state" != "ready" ]; then
   [ "$state" = "partial" ] && sqlcmd -Q "ALTER DATABASE shop SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE shop;"
   echo "Seeding the shop database…"
-  if sqlcmd -f 65001 -b -i /seed/seed.mssql.sql; then echo "Seeded."; else echo "Seeding FAILED (see above)."; fi
+  if sqlcmd -f 65001 -b -i /seed/seed.mssql.sql && sqlcmd -f 65001 -b -i /seed/examples.mssql.sql; then
+    echo "Seeded."
+  else
+    echo "Seeding FAILED (see above)."
+  fi
 fi
 wait $server

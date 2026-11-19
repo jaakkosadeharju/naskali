@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fuzzyMatch } from '../fuzzy'
+import { tableKey } from '../workspaceStore'
 import type { SchemaInfo } from '../../../shared/types'
 
 const MAX_RESULTS = 50
@@ -11,6 +12,7 @@ interface Props {
   currentDb: string | null
   /** "schema.table" keys, most recent first. */
   recent: string[]
+  favourites: ReadonlySet<string>
   onOpen: (schema: string, table: string, view: 'data' | 'schema') => void
   onRunLookup: (sql: string) => boolean
   onClose: () => void
@@ -33,7 +35,7 @@ interface Result extends Item {
   recent: boolean
 }
 
-export function TablePalette({ schemas, currentDb, recent, onOpen, onRunLookup, onClose }: Props): JSX.Element {
+export function TablePalette({ schemas, currentDb, recent, favourites, onOpen, onRunLookup, onClose }: Props): JSX.Element {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
   const [lookupError, setLookupError] = useState<string | null>(null)
@@ -174,7 +176,11 @@ export function TablePalette({ schemas, currentDb, recent, onOpen, onRunLookup, 
                 onMouseMove={() => i !== selected && setSelected(i)}
                 onClick={(e) => void open(r, e.ctrlKey || e.metaKey ? 'schema' : 'data')}
               >
-                <span className="palette-icon">{r.type === 'VIEW' ? '👁' : '▦'}</span>
+                <span className="palette-icon">
+                  {favourites.has(tableKey(r.schema, r.table))
+                    ? <span className="table-favourite-star" role="img" aria-label="Favourite">★</span>
+                    : r.type === 'VIEW' ? '👁' : '▦'}
+                </span>
                 <span className="palette-name">
                   <Highlight text={r.label} positions={r.positions} />
                 </span>

@@ -293,10 +293,17 @@ export class MySqlDriver implements Driver {
        FROM information_schema.COLUMNS WHERE TABLE_SCHEMA NOT IN (?) ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION`,
       [SYSTEM_SCHEMAS]
     )
+    const functions = await run<{ schema: string; name: string }[]>(
+      meta,
+      `SELECT ROUTINE_SCHEMA AS \`schema\`, ROUTINE_NAME AS name FROM information_schema.ROUTINES
+       WHERE ROUTINE_TYPE = 'FUNCTION' AND ROUTINE_SCHEMA NOT IN (?) ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME`,
+      [SYSTEM_SCHEMAS]
+    )
     return buildSchemaTree(
       schemas.map((s) => s.name),
       tables,
-      columns.map((c) => ({ ...c, nullable: c.nullable === 'YES' }))
+      columns.map((c) => ({ ...c, nullable: c.nullable === 'YES' })),
+      functions
     )
   }
 }

@@ -10,7 +10,8 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - ./docker/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+      - ./docker/seed.sql:/docker-entrypoint-initdb.d/10-seed.sql:ro
+      - ./docker/examples.mysql.sql:/docker-entrypoint-initdb.d/20-examples.sql:ro
 
   postgres:
     image: postgres:17
@@ -22,7 +23,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./docker/seed.postgres.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+      - ./docker/seed.postgres.sql:/docker-entrypoint-initdb.d/10-seed.sql:ro
+      - ./docker/examples.postgres.sql:/docker-entrypoint-initdb.d/20-examples.sql:ro
 
   # Opt-in (npm run db:up:mssql). Running it accepts Microsoft's SQL Server EULA
   # (Developer edition). Host port 14330, so it doesn't clash with a local SQL Server on 1433.
@@ -40,3 +42,4 @@ services:
     volumes:
       - ./docker/mssql-entrypoint.sh:/seed/mssql-entrypoint.sh:ro
       - ./docker/seed.mssql.sql:/seed/seed.mssql.sql:ro
+      - ./docker/examples.mssql.sql:/seed/examples.mssql.sql:ro

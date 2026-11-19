@@ -20,6 +20,7 @@ export function installApplicationMenu(window: BrowserWindow): void {
       label: 'File',
       submenu: [
         command('new-query', 'New Query Tab', 'CommandOrControl+T'),
+        command('save-query', 'Save Query…', 'CommandOrControl+S'),
         command('close-tab', 'Close Tab', 'CommandOrControl+W'),
         { type: 'separator' },
         command('export-csv', 'Export as CSV…'),
@@ -79,8 +80,10 @@ export function installApplicationMenu(window: BrowserWindow): void {
               title: 'Keyboard Shortcuts',
               message: 'Keyboard Shortcuts',
               detail: [
-                `${mod}T    New query tab`,
+                `${mod}N or ${mod}T    New query tab`,
+                `${mod}S    Save query`,
                 `${mod}W    Close tab`,
+                'Ctrl+Tab or Ctrl+Shift+Tab    Switch tabs in either direction',
                 `${mod}Enter or F5    Run selection or statement in a query tab`,
                 `${mod}/    Toggle SQL line comment (${mod}Shift+7 on Finnish keyboards)`,
                 `${blockCommentShortcut}    Toggle SQL block comment`,

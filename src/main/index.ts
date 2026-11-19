@@ -11,7 +11,9 @@ import { primaryKeyLookupSql } from './tableQuery'
 import { changeTable, createTableSql } from './tableSchema'
 import { resultEditInfo } from './resultEditing'
 import { deleteConnection, listConnections, saveConnection } from './connectionStore'
-import type { CellValue, ChangeSet, ConnectionConfig, CreateTableAction, ExplorerMenuAction, ExportFormat, IpcResult, ResultField, TableAction, TableDataRequest } from '../shared/types'
+import { createFavouritesStore } from './favouritesStore'
+import { createSavedQueryStore } from './savedQueryStore'
+import type { CellValue, ChangeSet, ConnectionConfig, CreateTableAction, ExplorerMenuAction, ExportFormat, IpcResult, ResultField, TableAction, TableDataRequest, TableMenuOptions } from '../shared/types'
 // `?asset` makes electron-vite copy the file into the build and give us its runtime path.
 import icon from '../../resources/icon.png?asset'
 // splash.html loads splash.png from the same folder (resources/ is packaged as-is).
@@ -20,6 +22,8 @@ import splashHtml from '../../resources/splash.html?asset'
 /** The connected database, if any. */
 let driver: Driver | null = null
 let querySessions: QuerySessions | null = null
+const favourites = createFavouritesStore(() => join(app.getPath('userData'), 'favourites.json'))
+const savedQueries = createSavedQueryStore(() => join(app.getPath('userData'), 'saved-queries.json'))
 const requireDriver = (): Driver => {
   if (!driver) throw new Error('Not connected')
   return driver
@@ -150,6 +154,11 @@ handle('db:disconnect', disconnect)
 handle('db:listConnections', listConnections)
 handle('db:saveConnection', saveConnection)
 handle('db:deleteConnection', deleteConnection)
+handle('db:loadFavourites', favourites.load)
+handle('db:setFavourite', favourites.set)
+handle('db:loadSavedQueries', savedQueries.load)
+handle('db:saveQuery', savedQueries.save)
+handle('db:deleteSavedQuery', savedQueries.remove)
 handle('db:introspect', () => requireDriver().introspect())
 handle('db:query', async (tabId: string, sql: string) => {
   if (!querySessions) throw new Error('Not connected')
@@ -187,19 +196,23 @@ handle('db:pickSqliteFile', async () => {
   const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
-handle('db:explorerMenu', (target: 'schema' | 'table' | 'procedure') =>
+handle('db:explorerMenu', (target: 'schema' | 'table' | 'procedure', options?: TableMenuOptions) =>
   new Promise<ExplorerMenuAction | null>((resolve) => {
     const item = (label: string, action: ExplorerMenuAction): Electron.MenuItemConstructorOptions =>
       ({ label, click: () => resolve(action) })
+    const favourite = item(options?.favourite ? 'Remove from Favourites' : 'Add to Favourites', 'toggle-favourite')
     const menu = Menu.buildFromTemplate(target === 'schema'
       ? [item('New table…', 'new')]
       : target === 'procedure'
-        ? [item('Open CREATE statement', 'procedure-create'), item('Open EXEC statement', 'procedure-exec')]
+        ? [item('Open CREATE statement', 'procedure-create'), item('Open EXEC statement', 'procedure-exec'), { type: 'separator' }, favourite]
         : [
-            item('Edit schema…', 'edit'),
-            { type: 'separator' },
-            item('Truncate table…', 'truncate'),
-            item('Drop table…', 'drop')
+            favourite,
+            ...(options?.canChange ? [
+              { type: 'separator' } as const,
+              item('Edit schema…', 'edit'),
+              item('Truncate table…', 'truncate'),
+              item('Drop table…', 'drop')
+            ] : [])
           ])
     menu.popup({ callback: () => resolve(null) })
   }))

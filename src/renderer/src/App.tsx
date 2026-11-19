@@ -10,23 +10,23 @@ import { QueryResultsView } from './components/QueryResultsView'
 import { TableView, type TableViewMode } from './components/TableView'
 import { ValueInspector } from './components/ValueInspector'
 import { TablePalette } from './components/TablePalette'
+import { SaveQueryDialog } from './components/SaveQueryDialog'
 import { InspectorContext, type InspectedValue, type InspectorApi } from './inspector'
-import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SchemaInfo, type TableAction } from '../../shared/types'
+import { DRIVER_LABELS, type ConnectionColor, type ConnectionConfig, type ConnectionInfo, type QueryResult, type RowFilter, type SavedQuery, type SchemaInfo, type TableAction } from '../../shared/types'
 import { setEditorDialect } from './monacoSetup'
 import type { MenuCommand } from '../../shared/menuCommands'
 import { MenuActionsContext, type RegisterMenuAction } from './menuActions'
-import { loadWorkspace, saveWorkspace, type WorkspaceTab } from './workspaceStore'
+import { connectionIdentity, loadLegacyFavourites, loadLegacySavedQueries, loadWorkspace, procedureKey, saveWorkspace, tableKey, type WorkspaceTab } from './workspaceStore'
 
 interface Connection {
   /** e.g. "dev@127.0.0.1:5432/shop" or "shop.sqlite" */
   label: string
   color: ConnectionColor
   profileId: string | null
+  storageIdentity: string
   readOnly: boolean
   info: ConnectionInfo
 }
-
-const tableVersionKey = (schema: string, table: string): string => JSON.stringify([schema, table])
 
 function connectionLabel(cfg: ConnectionConfig, info: ConnectionInfo): string {
   if (cfg.driver === 'sqlite') return cfg.file.split(/[\\/]/).pop() || cfg.file
@@ -112,12 +112,18 @@ export function App(): JSX.Element {
   const [databaseError, setDatabaseError] = useState<string | null>(null)
   const [schemas, setSchemas] = useState<SchemaInfo[]>([])
   const [tabs, setTabs] = useState<Tab[]>([])
+  const [favourites, setFavourites] = useState<Set<string>>(new Set())
+  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
+  const [sqlToSave, setSqlToSave] = useState<{ tabId: string; sql: string; savedQuery?: SavedQuery } | null>(null)
+  const [explorerStorageError, setExplorerStorageError] = useState<string | null>(null)
   const [activeId, setActiveId] = useState(FIRST_QUERY.id)
   const [procedureError, setProcedureError] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
   const [designer, setDesigner] = useState<DesignerRequest | null>(null)
   const [tableVersions, setTableVersions] = useState<Record<string, number>>({})
   const tabbar = useRef<HTMLElement>(null)
+  const recentTabIds = useRef<string[]>([])
+  const tabCycle = useRef<string[] | null>(null)
   const tabDrag = useRef<TabDrag | null>(null)
   const suppressTabClick = useRef(false)
   const [tabDrop, setTabDrop] = useState<TabDrop | null>(null)
@@ -132,6 +138,7 @@ export function App(): JSX.Element {
   const dirtyTabs = useRef(new Set<string>())
 
   useEffect(() => {
+    recentTabIds.current = [activeId, ...recentTabIds.current.filter((id) => id !== activeId)]
     tabbar.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [activeId])
 
@@ -146,7 +153,7 @@ export function App(): JSX.Element {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault()
         e.stopPropagation()
-        if (!connected || designer || switchingDatabase) return
+        if (!connected || designer || switchingDatabase || sqlToSave !== null) return
         setPaletteOpen((open) => {
           if (!open) focusBeforePalette.current = document.activeElement
           return !open
@@ -155,7 +162,7 @@ export function App(): JSX.Element {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [connected, designer, switchingDatabase])
+  }, [connected, designer, switchingDatabase, sqlToSave])
   const closePalette = (): void => {
     setPaletteOpen(false)
     // Give focus back to where the user was (editor, grid…).
@@ -217,8 +224,15 @@ export function App(): JSX.Element {
   }, [])
 
   const onConnected = useCallback(
-    (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor, profileId: string | null) => {
+    async (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor, profileId: string | null) => {
       const workspace = profileId ? loadWorkspace(profileId) : null
+      const identity = connectionIdentity(cfg, profileId)
+      const legacy = loadLegacyFavourites(identity, workspace?.favourites)
+      const legacyQueries = loadLegacySavedQueries(identity)
+      const [savedFavourites, storedQueries] = await Promise.all([
+        window.api.loadFavourites(identity, legacy),
+        window.api.loadSavedQueries(identity, legacyQueries)
+      ])
       const restored = workspace?.tabs.map((tab): Tab =>
         tab.kind === 'query' ? { ...tab, run: { status: 'idle' } } : tab
       ) ?? [FIRST_QUERY]
@@ -228,10 +242,16 @@ export function App(): JSX.Element {
       nextQueryNumber.current = restored.reduce((next, tab) =>
         tab.kind === 'query' ? Math.max(next, tab.number + 1) : next, 2
       )
+      recentTabIds.current = []
+      tabCycle.current = null
+      setFavourites(new Set(savedFavourites.ok ? savedFavourites.value : legacy))
+      setSavedQueries(storedQueries.ok ? storedQueries.value : legacyQueries)
+      setExplorerStorageError(!storedQueries.ok ? `Could not load saved queries. ${storedQueries.error}`
+        : !savedFavourites.ok ? `Could not load favourites. ${savedFavourites.error}` : null)
       setTabs(restored)
       setActiveId(restored.find((tab) => tab.id === workspace?.activeId)?.id ?? lastQueryId.current)
       connectionGeneration.current++
-      setConn({ label: connectionLabel(cfg, info), color, profileId, info, readOnly: cfg.driver === 'sqlite' && !!cfg.readOnly })
+      setConn({ label: connectionLabel(cfg, info), color, profileId, storageIdentity: identity, info, readOnly: cfg.driver === 'sqlite' && !!cfg.readOnly })
       setEditorDialect(info.driver)
       defaultSchema.current = info.schema
       querySchemas.current.clear()
@@ -246,8 +266,8 @@ export function App(): JSX.Element {
     if (!profileId) return
     const savedTabs = tabs.map((tab): WorkspaceTab => {
       if (tab.kind === 'table') return tab
-      const { id, kind, number, sql, split } = tab
-      return { id, kind, number, sql, split }
+      const { id, kind, number, sql, split, savedQueryId } = tab
+      return { id, kind, number, sql, split, savedQueryId }
     })
     saveWorkspace(profileId, { tabs: savedTabs, activeId, lastQueryId: lastQueryId.current })
   }, [profileId, tabs, activeId])
@@ -275,10 +295,10 @@ export function App(): JSX.Element {
 
   const canExecute = (): boolean => !!conn && !disconnecting && !switchingDatabase && !designer
 
-  const execute = (id: string): void => {
+  const execute = (id: string, statementOnly = false): void => {
     const editor = editors.current.get(id)
     if (!canExecute() || runningQueries.current.has(id)) return
-    const sql = editor && sqlToRun(editor)
+    const sql = editor && sqlToRun(editor, statementOnly)
     if (!sql) return
     if (dirtyTabs.current.has(id) && !window.confirm('Discard unsaved changes to the results?')) return
     void runSql(id, sql)
@@ -368,6 +388,10 @@ export function App(): JSX.Element {
     [openTable]
   )
 
+  const focusActiveTabLabel = (): void => {
+    requestAnimationFrame(() => tabbar.current?.querySelector<HTMLButtonElement>('.tab.active .tab-label')?.focus())
+  }
+
   const activateTab = (tab: Tab): void => {
     setActiveId(tab.id)
     if (tab.kind === 'query') {
@@ -377,12 +401,18 @@ export function App(): JSX.Element {
     }
   }
 
-  const newQueryTab = (initialSql?: string): string => {
+  const newQueryTab = (initialSql?: string, savedQueryId?: string): string => {
     const number = nextQueryNumber.current++
-    const tab: QueryTab = { id: `query:${number}`, kind: 'query', number, run: { status: 'idle' }, sql: initialSql ?? '', selectOnMount: !!initialSql }
+    const tab: QueryTab = { id: `query:${number}`, kind: 'query', number, run: { status: 'idle' }, sql: initialSql ?? '', selectOnMount: !!initialSql, savedQueryId }
     setTabs((ts) => [...ts, tab])
     activateTab(tab)
     return tab.id
+  }
+
+  const openSavedQuery = (query: SavedQuery): void => {
+    const tab = tabs.find((item) => item.kind === 'query' && item.savedQueryId === query.id)
+    if (tab) activateTab(tab)
+    else newQueryTab(query.sql, query.id)
   }
 
   const openInEditor = (sql: string): void => {
@@ -392,10 +422,16 @@ export function App(): JSX.Element {
 
   const openProcedureMenu = async (schema: string, name: string): Promise<void> => {
     const generation = connectionGeneration.current
-    const menu = await window.api.explorerMenu('procedure')
+    const key = procedureKey(schema, name)
+    const favourite = favourites.has(key)
+    const menu = await window.api.explorerMenu('procedure', { favourite, canChange: false })
     if (generation !== connectionGeneration.current) return
     if (!menu.ok) {
       setProcedureError(menu.error)
+      return
+    }
+    if (menu.value === 'toggle-favourite') {
+      await updateFavourite(key, !favourite)
       return
     }
     if (menu.value !== 'procedure-create' && menu.value !== 'procedure-exec') return
@@ -411,12 +447,12 @@ export function App(): JSX.Element {
 
   const closeTab = (id: string): void => {
     if (id === FIRST_QUERY.id || runningQueries.current.has(id)) return
-    const idx = tabs.findIndex((t) => t.id === id)
-    const tab = tabs[idx]
+    const tab = tabs.find((t) => t.id === id)
     if (!tab) return
     const name = tab.kind === 'table' ? tab.table : `Query ${tab.number} results`
     if (dirtyTabs.current.has(id) && !window.confirm(`Discard unsaved changes to ${name}?`)) return
     dirtyTabs.current.delete(id)
+    recentTabIds.current = recentTabIds.current.filter((recent) => recent !== id)
     editors.current.delete(id)
     if (tab.kind === 'query') {
       querySchemas.current.delete(id)
@@ -424,11 +460,16 @@ export function App(): JSX.Element {
     }
     const next = tabs.filter((t) => t.id !== id)
     if (lastQueryId.current === id) {
-      lastQueryId.current = next.slice(0, idx).reverse().find((t) => t.kind === 'query')?.id ?? FIRST_QUERY.id
+      lastQueryId.current = recentTabIds.current.find((recent) => next.some((t) => t.id === recent && t.kind === 'query')) ?? FIRST_QUERY.id
       showQuerySchema(lastQueryId.current)
     }
     setTabs(next)
-    if (id === activeId) activateTab(next[Math.max(0, idx - 1)])
+    if (id === activeId) {
+      const previousId = recentTabIds.current.find((recent) => next.some((t) => t.id === recent))
+      const target = next.find((t) => t.id === (previousId ?? lastQueryId.current)) ?? FIRST_QUERY
+      activateTab(target)
+      if (target.kind === 'table') focusActiveTabLabel()
+    }
   }
 
   const setTableView = (id: string, view: TableViewMode): void =>
@@ -522,7 +563,7 @@ export function App(): JSX.Element {
   const visibleSchemas = canSwitchDatabase ? schemas.filter((schema) => schema.name === currentDb) : schemas
   const databaseNames = canSwitchDatabase ? schemas.map((schema) => schema.name) : undefined
   const workspaceReady = connected && !disconnecting && !switchingDatabase
-  const workspaceInteractive = workspaceReady && !paletteOpen && !designer
+  const workspaceInteractive = workspaceReady && !paletteOpen && !designer && sqlToSave === null
   const canChangeSchema = workspaceInteractive && !queryRunning && !conn?.readOnly
 
   const newTable = (schema?: string): void => {
@@ -530,10 +571,27 @@ export function App(): JSX.Element {
     if (target) setDesigner({ kind: 'create', schema: target })
   }
 
-  const openExplorerMenu = async (schema: string, table?: string): Promise<void> => {
+  const updateFavourite = async (key: string, favourite: boolean): Promise<void> => {
+    if (!conn) return
     const generation = connectionGeneration.current
-    const result = await window.api.explorerMenu(table === undefined ? 'schema' : 'table')
-    if (generation !== connectionGeneration.current || runningQueries.current.size || !result.ok || !result.value) return
+    const result = await window.api.setFavourite(conn.storageIdentity, key, favourite)
+    if (generation !== connectionGeneration.current) return
+    if (result.ok) setFavourites(new Set(result.value))
+    setExplorerStorageError(result.ok ? null : `Could not save favourites. ${result.error}`)
+  }
+
+  const openExplorerMenu = async (schema: string, table?: string, baseTable = false): Promise<void> => {
+    const generation = connectionGeneration.current
+    const key = table === undefined ? undefined : tableKey(schema, table)
+    const result = key === undefined
+      ? await window.api.explorerMenu('schema')
+      : await window.api.explorerMenu('table', { favourite: favourites.has(key), canChange: baseTable && canChangeSchema })
+    if (generation !== connectionGeneration.current || !result.ok || !result.value) return
+    if (result.value === 'toggle-favourite' && key !== undefined) {
+      await updateFavourite(key, !favourites.has(key))
+      return
+    }
+    if (runningQueries.current.size) return
     if (result.value === 'new') newTable(schema)
     else if (table !== undefined && (result.value === 'edit' || result.value === 'drop' || result.value === 'truncate')) {
       setDesigner({ kind: result.value, schema, table })
@@ -550,6 +608,8 @@ export function App(): JSX.Element {
     if (!result.ok) return result.error
 
     if (action.kind === 'drop') {
+      const key = tableKey(schema, table)
+      if (favourites.has(key)) await updateFavourite(key, false)
       setTabs((current) => current.filter((tab) => !matches(tab)))
       if (matches(activeTab)) setActiveId(lastQueryId.current)
     } else if (action.kind === 'create') {
@@ -566,7 +626,7 @@ export function App(): JSX.Element {
           applied: tab.applied && { ...tab.applied, filters: updateFilters(tab.applied.filters) }
         } : tab))
       }
-      setTableVersions((versions) => ({ ...versions, [tableVersionKey(schema, table)]: (versions[tableVersionKey(schema, table)] ?? 0) + 1 }))
+      setTableVersions((versions) => ({ ...versions, [tableKey(schema, table)]: (versions[tableKey(schema, table)] ?? 0) + 1 }))
     }
     await refreshSchema()
     setDesigner(null)
@@ -577,6 +637,31 @@ export function App(): JSX.Element {
   const canRun = workspaceInteractive && !activeQueryRunning && activeTab.kind === 'query'
   const canDisconnect = workspaceInteractive && !queryRunning
   const queryEditor = workspaceInteractive && activeTab.kind === 'query'
+  const activeSavedQueryId = activeTab.kind === 'query' ? activeTab.savedQueryId : undefined
+  const queryName = (tab: QueryTab): string =>
+    savedQueries.find((query) => query.id === tab.savedQueryId)?.name ?? `Query ${tab.number}`
+  const saveActiveQuery = queryEditor && activeTab.kind === 'query' && activeTab.sql.trim()
+    ? () => setSqlToSave({
+      tabId: activeTab.id,
+      sql: editors.current.get(activeTab.id)?.getValue() ?? activeTab.sql,
+      savedQuery: savedQueries.find((query) => query.id === activeSavedQueryId)
+    })
+    : undefined
+
+  const removeSavedQuery = async (query: SavedQuery): Promise<void> => {
+    if (!conn || !window.confirm(`Delete saved query “${query.name}”?`)) return
+    const generation = connectionGeneration.current
+    const result = await window.api.deleteSavedQuery(conn.storageIdentity, query.id)
+    if (generation !== connectionGeneration.current) return
+    if (!result.ok) {
+      setExplorerStorageError(`Could not delete the saved query. ${result.error}`)
+      return
+    }
+    setSavedQueries(result.value)
+    setExplorerStorageError(null)
+    setTabs((current) => current.map((tab) => tab.kind === 'query' && tab.savedQueryId === query.id
+      ? { ...tab, savedQueryId: undefined } : tab))
+  }
   const toggleComment = (action: 'editor.action.commentLine' | 'editor.action.blockComment'): void => {
     const editor = editors.current.get(activeTab.id)
     editor?.focus()
@@ -586,6 +671,7 @@ export function App(): JSX.Element {
     connect: !connected ? () => document.querySelector<HTMLButtonElement>('.connection-sidebar button[aria-current="true"]')?.focus() : undefined,
     disconnect: canDisconnect ? () => void disconnect() : undefined,
     'new-query': workspaceInteractive ? () => newQueryTab() : undefined,
+    'save-query': saveActiveQuery,
     'close-tab': workspaceInteractive && activeTab.id !== FIRST_QUERY.id &&
       !(activeTab.kind === 'query' && activeTab.run.status === 'running') ? () => closeTab(activeTab.id) : undefined,
     'refresh-schema': workspaceInteractive ? () => void refreshSchema() : undefined,
@@ -593,7 +679,7 @@ export function App(): JSX.Element {
     'cancel-query': activeQueryRunning ? () => void window.api.cancel(activeTab.id) : undefined,
     'toggle-line-comment': queryEditor ? () => toggleComment('editor.action.commentLine') : undefined,
     'toggle-block-comment': queryEditor ? () => toggleComment('editor.action.blockComment') : undefined,
-    'find-table': workspaceReady && !designer ? () => {
+    'find-table': workspaceReady && !designer && sqlToSave === null ? () => {
       if (paletteOpen) closePalette()
       else {
         focusBeforePalette.current = document.activeElement
@@ -612,11 +698,36 @@ export function App(): JSX.Element {
   useEffect(() => window.api.onMenuCommand((command) => menuDispatch.current(command)), [])
 
   useEffect(() => {
-    if (!workspaceInteractive) return
+    if (!workspaceInteractive) {
+      tabCycle.current = null
+      return
+    }
     const inQuery = activeTab.kind === 'query'
     const inTableData = activeTab.kind === 'table' && activeTab.view === 'data'
-    if (!inQuery && !inTableData) return
     const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Tab' && event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault()
+        event.stopPropagation()
+        if (tabs.length < 2) return
+        // Keep the order fixed until Ctrl is released so consecutive presses can reach every tab.
+        const order = tabCycle.current ??= [...new Set([activeTab.id, ...recentTabIds.current, ...tabs.map((tab) => tab.id)])]
+        const available = order.filter((id) => tabs.some((tab) => tab.id === id))
+        const index = available.indexOf(activeTab.id)
+        const step = event.shiftKey ? -1 : 1
+        const next = tabs.find((tab) => tab.id === available[(index + step + available.length) % available.length])
+        if (next) {
+          activateTab(next)
+          if (next.kind === 'table') focusActiveTabLabel()
+        }
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        event.stopPropagation()
+        if (!event.repeat) menuDispatch.current('new-query')
+        return
+      }
+      if (!inQuery && !inTableData) return
       // On layouts such as Finnish, typing "/" requires Shift.
       const comment = inQuery && (event.ctrlKey || event.metaKey) && !event.altKey &&
         event.key === '/' && editors.current.get(activeTab.id)?.hasTextFocus()
@@ -634,9 +745,21 @@ export function App(): JSX.Element {
       event.stopPropagation()
       if (!event.repeat) menuDispatch.current(inQuery ? 'run-query' : 'refresh-table-data')
     }
+    const resetCycle = (): void => { tabCycle.current = null }
+    const onKeyUp = (event: KeyboardEvent): void => {
+      if (!event.ctrlKey) resetCycle()
+    }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [workspaceInteractive, activeTab])
+    window.addEventListener('keyup', onKeyUp, true)
+    window.addEventListener('blur', resetCycle)
+    window.addEventListener('pointerdown', resetCycle, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('keyup', onKeyUp, true)
+      window.removeEventListener('blur', resetCycle)
+      window.removeEventListener('pointerdown', resetCycle, true)
+    }
+  }, [workspaceInteractive, activeTab, tabs])
 
   const sentMenuAvailability = useRef('')
   useEffect(() => {
@@ -653,6 +776,7 @@ export function App(): JSX.Element {
       <div className={`app ${inspectorOpen ? 'with-inspector' : ''}`} data-connection-color={conn?.color}>
         <header className="toolbar">
           <button onClick={() => newQueryTab()} disabled={!conn || disconnecting}>+ New query</button>
+          {activeTab.kind === 'query' && conn && <button onClick={saveActiveQuery} disabled={!saveActiveQuery}>Save query…</button>}
           <button
             className="primary"
             onClick={() => void execute(activeTab.id)}
@@ -689,7 +813,14 @@ export function App(): JSX.Element {
             onProcedureMenu={workspaceInteractive ? openProcedureMenu : undefined}
             procedureError={procedureError}
             onNewTable={canChangeSchema && visibleSchemas.length > 0 ? newTable : undefined}
-            onContextMenu={canChangeSchema ? openExplorerMenu : undefined}
+            favourites={favourites}
+            savedQueries={conn ? savedQueries : []}
+            explorerStorageError={conn ? explorerStorageError : null}
+            activeSavedQueryId={activeSavedQueryId}
+            onOpenSavedQuery={openSavedQuery}
+            onRemoveSavedQuery={removeSavedQuery}
+            onSchemaContextMenu={canChangeSchema ? openExplorerMenu : undefined}
+            onTableContextMenu={workspaceInteractive ? openExplorerMenu : undefined}
             onRefresh={workspaceInteractive ? refreshSchema : undefined}
             onDisconnect={canDisconnect ? disconnect : undefined}
           />
@@ -735,11 +866,11 @@ export function App(): JSX.Element {
                   title={
                     t.kind === 'table'
                       ? `${t.schema}.${t.table}${t.filters?.length ? ` where ${filterSummary(t.filters)}` : ''}`
-                      : `SQL editor ${t.number}`
+                      : queryName(t)
                   }
                 >
                   {t.kind === 'query' ? (
-                    `✎ Query ${t.number}${t.run.status === 'running' ? ' …' : ''}`
+                    `✎ ${queryName(t)}${t.run.status === 'running' ? ' …' : ''}`
                   ) : (
                     <>
                       {t.view === 'schema' ? 'ⓘ' : '▦'} {t.table}
@@ -750,7 +881,7 @@ export function App(): JSX.Element {
                 {t.id !== FIRST_QUERY.id && (
                   <button
                     className="tab-close"
-                    aria-label={t.kind === 'query' ? `Close Query ${t.number}` : `Close ${t.table}`}
+                    aria-label={t.kind === 'query' ? `Close ${queryName(t)}` : `Close ${t.table}`}
                     disabled={t.kind === 'query' && t.run.status === 'running'}
                     onClick={() => closeTab(t.id)}
                   >
@@ -778,14 +909,15 @@ export function App(): JSX.Element {
                     tab.kind === 'query' && tab.id === t.id ? { ...tab, sql } : tab
                   ))}
                   onMount={(editor) => editors.current.set(t.id, editor)}
-                  onRun={() => execute(t.id)}
+                  onRun={(statementOnly) => execute(t.id, statementOnly)}
+                  runDisabled={!workspaceInteractive || t.run.status === 'running'}
                 />
               }
               results={
                 <MenuActionsContext.Provider value={t.id === activeId ? menuScope : null}>
                   <ResultsPanel
                     run={t.run}
-                    label={`Query ${t.number}`}
+                    label={queryName(t)}
                     onRerun={(sql, notice) => void runSql(t.id, sql, notice)}
                     onDirtyChange={(dirty) => {
                       if (dirty) dirtyTabs.current.add(t.id)
@@ -803,7 +935,7 @@ export function App(): JSX.Element {
                 <div key={t.id} className="tab-panel" hidden={t.id !== activeId}>
                   <MenuActionsContext.Provider value={t.id === activeId ? menuScope : null}>
                     <TableView
-                      key={tableVersions[tableVersionKey(t.schema, t.table)] ?? 0}
+                      key={tableVersions[tableKey(t.schema, t.table)] ?? 0}
                       onEditSchema={canChangeSchema ? () => setDesigner({ kind: 'edit', schema: t.schema, table: t.table }) : undefined}
                       sqlite={conn?.info.driver === 'sqlite'}
                       schema={t.schema}
@@ -847,6 +979,24 @@ export function App(): JSX.Element {
         </footer>
 
         {!conn && <ConnectDialog onConnected={onConnected} />}
+        {conn && sqlToSave !== null && (
+          <SaveQueryDialog
+            initialName={sqlToSave.savedQuery?.name}
+            onClose={() => setSqlToSave(null)}
+            onSave={async (name) => {
+              const existing = sqlToSave.savedQuery
+              const query = { id: existing?.id ?? crypto.randomUUID(), name, sql: sqlToSave.sql }
+              const result = await window.api.saveQuery(conn.storageIdentity, query)
+              if (!result.ok) return result.error
+              setSavedQueries(result.value)
+              setExplorerStorageError(null)
+              setTabs((current) => current.map((tab) => tab.kind === 'query' && tab.id === sqlToSave.tabId
+                ? { ...tab, savedQueryId: query.id } : tab))
+              setSqlToSave(null)
+              return null
+            }}
+          />
+        )}
         {conn && designer && (
           <TableDesigner request={designer} schemas={schemas} driver={conn.info.driver} onClose={() => setDesigner(null)} onApply={applyTableAction} onOpenSql={openInEditor} />
         )}
@@ -855,6 +1005,7 @@ export function App(): JSX.Element {
             schemas={visibleSchemas}
             currentDb={currentDb}
             recent={recentTables}
+            favourites={favourites}
             onClose={closePalette}
             onRunLookup={(sql) => {
               if (!canExecute()) return false

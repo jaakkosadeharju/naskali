@@ -67,3 +67,10 @@ INSERT INTO events (type, payload, raw_body) VALUES
   FROM seq),
  NULL),
 ('ping', json_array(1, 2.5, 'three', json('false'), NULL), 'pong');
+
+CREATE VIEW order_details AS
+SELECT o.id AS order_id, o.customer_id, c.name AS customer_name,
+       p.sku, o.quantity, p.price AS unit_price, round(o.quantity * p.price, 2) AS total, o.ordered_at
+FROM orders o
+JOIN customers c ON c.id = o.customer_id
+JOIN products p ON p.id = o.product_id;

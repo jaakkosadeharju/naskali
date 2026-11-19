@@ -91,11 +91,12 @@ export function groupForeignKeys(
   return [...out.values()]
 }
 
-/** Groups flat (schema, table, column) rows into SchemaInfo[] (schemas without tables included). */
+/** Groups catalog rows into schemas, including schemas without tables. */
 export function buildSchemaTree(
   schemas: string[],
   tables: { schema: string; table: string; type: string }[],
-  columns: { schema: string; table: string; name: string; type: string; nullable: boolean; key: string }[]
+  columns: { schema: string; table: string; name: string; type: string; nullable: boolean; key: string }[],
+  functions: { schema: string; name: string }[] = []
 ): SchemaInfo[] {
   const bySchema = new Map<string, SchemaInfo>(schemas.map((s) => [s, { name: s, tables: [] }]))
   const byTable = new Map<string, SchemaInfo['tables'][number]>()
@@ -107,6 +108,12 @@ export function buildSchemaTree(
   }
   for (const c of columns) {
     byTable.get(`${c.schema}\u0000${c.table}`)?.columns.push({ name: c.name, type: c.type, nullable: c.nullable, key: c.key })
+  }
+  for (const fn of functions) {
+    const schema = bySchema.get(fn.schema) ?? { name: fn.schema, tables: [] }
+    const names = schema.functions ??= []
+    names.push(fn.name)
+    bySchema.set(fn.schema, schema)
   }
   return [...bySchema.values()]
 }

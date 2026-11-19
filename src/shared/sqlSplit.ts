@@ -167,7 +167,10 @@ export function isPlainSelect(sql: string, rules: SplitRules = SPLIT_RULES.mysql
 
 /** The statement containing the cursor, or the closest one before it. */
 export function statementAt(sql: string, offset: number, rules?: SplitRules): Statement | null {
-  const stmts = splitStatements(sql, rules)
+  return statementAtOffset(splitStatements(sql, rules), offset)
+}
+
+export function statementAtOffset(stmts: readonly Statement[], offset: number): Statement | null {
   let best: Statement | null = null
   for (const s of stmts) {
     if (s.start <= offset) best = s

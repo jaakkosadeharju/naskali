@@ -255,10 +255,17 @@ export class PostgresDriver implements Driver {
        WHERE ${REL_KINDS} AND ${SYSTEM_SCHEMA_FILTER} AND NOT c.relispartition AND a.attnum > 0 AND NOT a.attisdropped
        ORDER BY 1, 2, a.attnum`
     )
+    const functions = await this.objects<{ schema: string; name: string }>(
+      `SELECT n.nspname AS schema, p.proname || '(' || oidvectortypes(p.proargtypes) || ')' AS name
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE p.prokind IN ('f', 'w') AND ${SYSTEM_SCHEMA_FILTER}
+       ORDER BY 1, 2`
+    )
     return buildSchemaTree(
       schemas.map((s) => s.name),
       tables,
-      columns.map((c) => ({ ...c, key: c.pk ? 'PRI' : '' }))
+      columns.map((c) => ({ ...c, key: c.pk ? 'PRI' : '' })),
+      functions
     )
   }
 

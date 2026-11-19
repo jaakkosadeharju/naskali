@@ -37,6 +37,21 @@ npm run dev          # app with hot reload
 | `npm run db:up` / `db:up:mssql` / `db:down` | Start the MySQL + PostgreSQL / also SQL Server / stop all dev containers |
 | `npm run db:sqlite` | (Re)build `dev/shop.sqlite` |
 
+The demo includes an `order_details` view on all four engines, plus a `line_total` function
+and a `customer_order_count` procedure on the three server engines. The explorer lists
+stored procedures on SQL Server.
+
+If you already have a running demo, add the examples without reseeding the tables:
+
+```sh
+docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot shop' < docker/examples.mysql.sql
+docker compose exec -T postgres psql -U dev -d shop -v ON_ERROR_STOP=1 < docker/examples.postgres.sql
+docker compose exec -T mssql sh -c 'exec /opt/mssql-tools18/bin/sqlcmd -C -I -b -S localhost -U sa -P "$MSSQL_SA_PASSWORD"' < docker/examples.mssql.sql
+```
+
+To add the view to an existing SQLite demo, run the `CREATE VIEW order_details` statement
+at the end of [the SQLite seed](docker/seed.sqlite.sql).
+
 ## Features
 
 - The native menu bar groups file, editing, connection, query, view, and help commands. Export and copy commands follow the active tab.

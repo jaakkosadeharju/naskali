@@ -14,7 +14,7 @@ import { removeWorkspace } from '../workspaceStore'
 import logo from '../assets/logo.png'
 
 interface Props {
-  onConnected: (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor, profileId: string | null) => void
+  onConnected: (cfg: ConnectionConfig, info: ConnectionInfo, color: ConnectionColor, profileId: string | null) => Promise<void>
 }
 
 const DRIVERS: DriverKind[] = ['mysql', 'postgres', 'mssql', 'sqlite']
@@ -97,7 +97,7 @@ export function ConnectDialog({ onConnected }: Props): JSX.Element {
     setTestPassed(false)
     try {
       const r = await window.api.connect(config)
-      if (r.ok) onConnected(config, r.value, theme, profileId)
+      if (r.ok) await onConnected(config, r.value, theme, profileId)
       else setError(r.error)
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
