@@ -12,7 +12,7 @@ linux:
   target: [AppImage, deb]
   category: Development
   icon: build/icons # per-size PNGs rendered from build/icon-source.png
-  maintainer: Naskali POC
+  maintainer: Naskali
   syncDesktopName: true # .desktop file name = desktopName, so the running window maps to its menu entry/icon
 mac:
   target: dmg

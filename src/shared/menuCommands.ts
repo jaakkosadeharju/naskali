@@ -7,4 +7,6 @@ export type MenuCommand =
   | 'new-query' | 'close-tab'
   | 'connect' | 'disconnect' | 'refresh-schema'
   | 'run-query' | 'cancel-query'
+  | 'toggle-line-comment' | 'toggle-block-comment'
   | 'find-table' | 'toggle-inspector'
+  | 'refresh-table-data'

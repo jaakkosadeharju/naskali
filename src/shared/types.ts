@@ -167,6 +167,11 @@ export interface RowFilter {
   operandType?: 'number' | 'text'
 }
 
+export interface TableSort {
+  column: string
+  direction: 'asc' | 'desc'
+}
+
 export interface TableDataRequest {
   schema: string
   table: string
@@ -174,6 +179,7 @@ export interface TableDataRequest {
   match: 'all' | 'any'
   offset: number
   limit: number
+  sort?: TableSort
 }
 
 export interface TableDataResult {
@@ -277,9 +283,10 @@ export interface SqlApi {
   deleteConnection(id: string): Promise<IpcResult<SavedConnection[]>>
   introspect(): Promise<IpcResult<SchemaInfo[]>>
   /** Also returns the session's current schema, since the SQL may have run `USE …` / `SET search_path …`. */
-  query(sql: string): Promise<IpcResult<{ result: QueryResult; schema: string | null }>>
+  query(tabId: string, sql: string): Promise<IpcResult<{ result: QueryResult; schema: string | null }>>
   exportRows(format: ExportFormat, name: string, columns: string[], rows: CellValue[][]): Promise<IpcResult<void>>
-  cancel(): Promise<IpcResult<void>>
+  cancel(tabId: string): Promise<IpcResult<void>>
+  closeQueryTab(tabId: string): Promise<IpcResult<void>>
   useSchema(name: string): Promise<IpcResult<void>>
   /** Shows a file picker for a SQLite database; null when cancelled. */
   pickSqliteFile(): Promise<IpcResult<string | null>>
@@ -288,6 +295,7 @@ export interface SqlApi {
   changeTable(action: TableAction): Promise<IpcResult<void>>
   procedureCall(schema: string, name: string): Promise<IpcResult<string>>
   procedureDefinition(schema: string, name: string): Promise<IpcResult<string>>
+  primaryKeyLookup(schema: string, table: string, value: string): Promise<IpcResult<string>>
   tableDetails(schema: string, table: string): Promise<IpcResult<TableDetails>>
   tableData(req: TableDataRequest): Promise<IpcResult<TableDataResult>>
   /** The statements `applyChanges` would run, with values inlined (for display). */

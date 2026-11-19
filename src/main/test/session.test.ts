@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { applyChanges, previewChanges } from '../session'
+import { applyChanges, previewChanges, tableData } from '../session'
 import { fakeDriver, table } from './fakeDriver'
-import type { ChangeSet } from '../../shared/types'
+import type { ChangeSet, TableDataRequest } from '../../shared/types'
 
 const tables = () => [
   table('shop', 'customers', [{ name: 'id', key: 'PRI' }, { name: 'name', type: 'varchar(100)' }]),
@@ -12,6 +12,38 @@ const sets: ChangeSet[] = [
   { schema: 'shop', table: 'orders', deletes: [{ key: { id: 7 } }], updates: [{ key: { id: 1 }, set: { status: 'paid' } }], inserts: [] },
   { schema: 'shop', table: 'customers', deletes: [], updates: [{ key: { id: 2 }, set: { name: 'Ada' } }], inserts: [] }
 ]
+
+describe('tableData sorting', () => {
+  const request: TableDataRequest = {
+    schema: 'shop', table: 'orders', filters: [{ column: 'id', op: '>', value: '10' }],
+    match: 'all', offset: 500, limit: 500
+  }
+
+  it.each([
+    [undefined, '`id`'],
+    [{ column: 'status', direction: 'asc' }, '`status` ASC, `id`'],
+    [{ column: 'status', direction: 'desc' }, '`status` DESC, `id`'],
+    [{ column: 'id', direction: 'desc' }, '`id` DESC']
+  ] as const)('orders the filtered rows before paging (%j)', async (sort, orderBy) => {
+    const driver = fakeDriver(tables())
+    const queries: string[] = []
+    driver.selectRows = async (sql) => {
+      queries.push(sql)
+      return { fields: [], rows: [] }
+    }
+    await tableData(driver, { ...request, sort })
+    expect(queries).toEqual([
+      'SELECT COUNT(*) AS total FROM `shop`.`orders` WHERE `id` > ?',
+      `SELECT * FROM \`shop\`.\`orders\` WHERE \`id\` > ? ORDER BY ${orderBy} LIMIT 500 OFFSET 500`
+    ])
+  })
+
+  it('rejects an unknown sort column before sending SQL', async () => {
+    await expect(tableData(fakeDriver(tables()), {
+      ...request, sort: { column: 'unknown', direction: 'asc' }
+    })).rejects.toThrow('Unknown column: unknown')
+  })
+})
 
 describe('applyChanges', () => {
   it('runs every change set in one transaction', async () => {

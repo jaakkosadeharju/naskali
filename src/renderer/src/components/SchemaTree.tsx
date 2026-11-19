@@ -6,6 +6,8 @@ interface Props {
   activeTable?: { schema: string; table: string }
   schemas: SchemaInfo[]
   currentDb: string | null
+  databaseNames?: string[]
+  databaseError?: string | null
   /** Absent when the database can't switch schemas. */
   onUseDatabase?: (name: string) => void
   onInsert: (text: string) => void
@@ -18,7 +20,7 @@ interface Props {
   onDisconnect?: () => void
 }
 
-export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onInsert, onOpenTable, onProcedureMenu, procedureError, onNewTable, onContextMenu, onRefresh, onDisconnect }: Props): JSX.Element {
+export function SchemaTree({ activeTable, schemas, currentDb, databaseNames, databaseError, onUseDatabase, onInsert, onOpenTable, onProcedureMenu, procedureError, onNewTable, onContextMenu, onRefresh, onDisconnect }: Props): JSX.Element {
   const [open, setOpen] = useState<Set<string>>(() => new Set(currentDb ? [currentDb] : []))
   const [filter, setFilter] = useState('')
   const activeSchema = activeTable?.schema
@@ -56,19 +58,36 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
           </button>
         </div>
       </div>
+      {databaseNames && (
+        <label className="tree-database">
+          <span>Database</span>
+          <select
+            value={currentDb ?? ''}
+            disabled={!onUseDatabase || databaseNames.length === 0}
+            onChange={(event) => onUseDatabase?.(event.target.value)}
+          >
+            {!currentDb && <option value="" disabled>Select a database</option>}
+            {currentDb && !databaseNames.includes(currentDb) && <option value={currentDb}>{currentDb}</option>}
+            {databaseNames.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </label>
+      )}
+      {databaseError && <p className="procedure-error" role="alert">{databaseError}</p>}
       <div className="tree-filter">
         <input aria-label="Filter database objects" placeholder={`Filter (${MOD}P: open table)`} value={filter} onChange={(e) => setFilter(e.target.value)} />
       </div>
       {procedureError && <p className="procedure-error" role="alert">{procedureError}</p>}
-      <ul>
+      <ul className={databaseNames ? 'database-objects' : undefined}>
+        {databaseNames && !currentDb && <li className="node muted">Select a database to see its tables.</li>}
+        {databaseNames && currentDb && schemas[0]?.tables.length === 0 && <li className="node muted">No tables in this database.</li>}
         {schemas.map((s) => {
           const tables = f ? s.tables.filter((t) => t.name.toLowerCase().includes(f)) : s.tables
           const procedures = (s.procedures ?? []).filter((name) => name.toLowerCase().includes(f))
           if (f && tables.length === 0 && procedures.length === 0) return null
-          const isOpen = open.has(s.name) || !!f
+          const isOpen = !!databaseNames || open.has(s.name) || !!f
           return (
             <li key={s.name}>
-              <div
+              {!databaseNames && <div
                 className={`node schema ${s.name === currentDb ? 'current' : ''}`}
                 tabIndex={onContextMenu ? 0 : undefined}
                 onContextMenu={onContextMenu ? (event) => {
@@ -80,7 +99,7 @@ export function SchemaTree({ activeTable, schemas, currentDb, onUseDatabase, onI
                 title={onUseDatabase ? 'Double-click to make this the current schema' : undefined}
               >
                 <span className="twisty">{isOpen ? '▾' : '▸'}</span>🗄 {s.name}
-              </div>
+              </div>}
               {isOpen && (
                 <ul>
                   {tables.map((t) => {

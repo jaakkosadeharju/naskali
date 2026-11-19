@@ -1,11 +1,11 @@
-# Naskali (POC)
+# Naskali
 
-A desktop SQL client proof of concept: **Electron + React + Monaco + Glide Data Grid** for
-**MySQL, PostgreSQL, SQL Server and SQLite**.
+A desktop SQL client for **MySQL, PostgreSQL, SQL Server, and SQLite**, built with
+**Electron, React, Monaco, and Glide Data Grid**.
 
 | Database | Driver | Notes |
 |---|---|---|
-| MySQL / MariaDB | `mysql2` | schemas = databases; double-click one to `USE` it |
+| MySQL / MariaDB | `mysql2` | choose the active database in the explorer dropdown |
 | PostgreSQL | `pg` + `pg-cursor` | schemas of the connected database; double-click sets `search_path` |
 | SQL Server | `mssql` (tedious) | schemas of the connected database (`dbo`, …) |
 | SQLite | Node's built-in `node:sqlite` | Table tools browse `main`. Attached databases are accessible in the editor session. |
@@ -51,7 +51,7 @@ npm run dev          # app with hot reload
 - Export loaded query results or the current filtered table page as CSV or JSON. Table exports use saved database values.
 - Right-click selected grid cells to copy them as CSV or JSON. **Copy as JSON with headers** uses column names as keys and returns one object for a single selected row or an array of objects for multiple rows.
 - Connection dialog with a database-type picker (SQLite: file + Browse…, read-only / create options)
-- Schema tree with filter; double-click a schema to make it current (MySQL, PostgreSQL), a column to insert its name
+- Filter tables in the explorer. MySQL shows the selected database, and PostgreSQL lets you double-click a schema to set the search path. Double-click a column to insert its name.
 - **Table tabs**: use the **Data** and **Schema** icons beside each table (double-click opens Data). Each tab has a Data | Schema toggle
   - *Schema*: columns, indexes, foreign keys, highlighted DDL
   - *Data*: paged (500 rows, PK-ordered) with a filter builder: column + operator + value rows joined by and/or.
@@ -80,9 +80,10 @@ npm run dev          # app with hot reload
 - **Foreign-key links**: foreign-key cells in the Data view show a small ↗ button that opens the referenced row in a new
   tab, pre-filtered (e.g. `customers id = 2`; composite keys filter on all columns). The same reference reuses its tab;
   the value inspector shows the link as a button too
-- **Table palette** – **Ctrl+P** (⌘P on macOS) from anywhere: fuzzy search over all tables (word-start acronyms like
-  `oi` → `order_items`; type `schema.table` to search across databases), recently opened tables first.
-  Enter opens the Data view, Ctrl/⌘+Enter the Schema view, Esc returns to where you were
+- **Table palette** – **Ctrl+P** (⌘P on macOS) from anywhere: fuzzy search in the current database (word-start acronyms like
+  `oi` → `order_items`; type `schema.table` for a qualified search), recently opened tables first.
+  Enter opens the Data view, Ctrl/⌘+Enter the Schema view, and Esc closes the palette. Enter `Table#id` to open and run a
+  lookup query for a table with a single-column primary key.
 - Schema-aware autocomplete: tables, columns, `alias.` → columns, `db.` → tables
 - Save named connection profiles in the connection dialog. Select a profile to reconnect, edit it, or remove it. Each profile can set the workspace accent color. Passwords are stored only when OS-backed encryption is available (`safeStorage`).
 
@@ -108,7 +109,7 @@ src/
 
 Database drivers live only in the main process. The renderer is sandboxed (`contextIsolation`, no `nodeIntegration`, strict CSP) and Monaco is bundled locally, so the app doesn't need a CDN.
 
-## Known POC limitations / next steps
+## Known limitations and next steps
 
 - One active connection; no query history yet
 - No optimistic-concurrency check beyond "row still exists" (a concurrent change to the same row is overwritten);

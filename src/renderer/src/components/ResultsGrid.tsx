@@ -5,6 +5,7 @@ import {
   type EditableGridCell,
   type CellClickedEventArgs,
   type DrawCellCallback,
+  type DrawHeaderCallback,
   type GridCell,
   type GridColumn,
   type GridSelection,
@@ -17,7 +18,7 @@ import { COPY_COMMANDS } from '../../../shared/menuCommands'
 import { useMenuActions } from '../menuActions'
 import { exportRows, exportSelectionAsJson } from '../../../shared/exportRows'
 import { temporalCellKind } from '../../../shared/editing'
-import type { CellAssignment, CellValue, ExportFormat, ResultField } from '../../../shared/types'
+import type { CellAssignment, CellValue, ExportFormat, ResultField, TableSort } from '../../../shared/types'
 import { useInspector } from '../inspector'
 import { editorDriver } from '../monacoSetup'
 
@@ -103,6 +104,9 @@ interface Props {
   cellLinks?: CellLinks
   /** Columns drawn with a muted header (not editable while others are). Keep it stable. */
   readOnlyColumns?: ReadonlySet<number>
+  sort?: TableSort
+  onSort?: (column: string) => void
+  sortDisabled?: boolean
 }
 
 export interface CellLinks {
@@ -157,7 +161,7 @@ interface CopyMenu {
   singleCell: boolean
 }
 
-export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selectionResetKey, sourceLabel, columnTypes, describeRow, cellLinks, readOnlyColumns }: Props): JSX.Element {
+export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selectionResetKey, sourceLabel, columnTypes, describeRow, cellLinks, readOnlyColumns, sort, onSort, sortDisabled }: Props): JSX.Element {
   const [columns, setColumns] = useState<GridColumn[]>([])
   const [selection, setSelection] = useState<GridSelection>(emptySelection)
   const [menu, setMenu] = useState<CopyMenu | null>(null)
@@ -172,6 +176,7 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
   // A new result (new `fields`) resets sizing and selection; edits only change `rows`.
   // Sizing also reruns once links appear (table details can arrive after the data).
   const hasLinks = !!cellLinks
+  const sortable = !!onSort
   useEffect(() => {
     const sample = Math.min(rowsRef.current.length, 50)
     const linked = (col: number): boolean => {
@@ -180,9 +185,9 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
     }
     // Columns with link buttons get room for the button.
     setColumns(
-      fields.map((f, i) => ({ id: String(i), title: f.name, width: initialWidth(f, i, rowsRef.current) + (linked(i) ? LINK_HIT : 0) }))
+      fields.map((f, i) => ({ id: String(i), title: f.name, width: initialWidth(f, i, rowsRef.current) + (linked(i) ? LINK_HIT : 0) + (sortable ? 26 : 0) }))
     )
-  }, [fields, hasLinks])
+  }, [fields, hasLinks, sortable])
 
   useEffect(() => {
     setSelection(emptySelection)
@@ -190,9 +195,47 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
   }, [fields])
 
   const shownColumns = useMemo(
-    () => (readOnlyColumns?.size ? columns.map((c, i) => (readOnlyColumns.has(i) ? { ...c, themeOverride: readOnlyHeaderTheme } : c)) : columns),
-    [columns, readOnlyColumns]
+    () => {
+      if (!sortable && !readOnlyColumns?.size) return columns
+      return columns.map((c, i) => ({
+        ...c,
+        hasMenu: sortable && !sortDisabled,
+        themeOverride: readOnlyColumns?.has(i) ? readOnlyHeaderTheme : undefined
+      }))
+    },
+    [columns, readOnlyColumns, sortable, sortDisabled]
   )
+
+  const drawSortHeader = useCallback<DrawHeaderCallback>(({ ctx, rect, column, menuBounds, theme }, drawContent) => {
+    // Use Glide's header button bounds for both drawing and click handling.
+    const onLeft = menuBounds.x === rect.x
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(onLeft ? rect.x + menuBounds.width : rect.x, rect.y, rect.width - menuBounds.width, rect.height)
+    ctx.clip()
+    drawContent()
+    ctx.restore()
+
+    const direction = sort?.column === column.title ? sort.direction : undefined
+    ctx.save()
+    ctx.strokeStyle = direction ? theme.accentColor : theme.textHeader
+    if (sortDisabled) ctx.globalAlpha = 0.5
+    const x = menuBounds.x + menuBounds.width / 2
+    const y = menuBounds.y + menuBounds.height / 2
+    ctx.lineWidth = 1.75
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    const chevron = (center: number, tip: number): void => {
+      ctx.moveTo(x - 4, center - tip)
+      ctx.lineTo(x, center + tip)
+      ctx.lineTo(x + 4, center - tip)
+    }
+    if (direction !== 'desc') chevron(y - (direction ? 0 : 3.5), -2)
+    if (direction !== 'asc') chevron(y + (direction ? 0 : 3.5), 2)
+    ctx.stroke()
+    ctx.restore()
+  }, [sort, sortDisabled])
 
   useEffect(() => {
     setSelection(emptySelection)
@@ -476,6 +519,10 @@ export function ResultsGrid({ fields, rows, editing, onSelectedRowsChange, selec
         }}
         onCellClicked={cellLinks ? onCellClicked : undefined}
         drawCell={cellLinks ? drawCell : undefined}
+        drawHeader={sortable ? drawSortHeader : undefined}
+        onHeaderMenuClick={onSort && !sortDisabled ? (col) => {
+          if (fields[col]) onSort(fields[col].name)
+        } : undefined}
         theme={darkTheme}
         rowMarkers="clickable-number"
         rowSelect="multi"

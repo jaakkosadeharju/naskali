@@ -75,6 +75,42 @@ export function buildWhere(d: SqlDialect, filters: RowFilter[], match: 'all' | '
   return { text: ' WHERE ' + parts.join(match === 'any' ? ' OR ' : ' AND '), params }
 }
 
+const INTEGER_KEY_TYPE = /^(?:(?:tiny|small|medium|big)?int(?:eger|[248])?|(?:small|big)?serial)\b/i
+const DECIMAL_KEY_TYPE = /^(?:decimal|numeric|dec|number|float[48]?|real|double|money|smallmoney)\b/i
+
+function lookupTextLiteral(d: SqlDialect, value: string): string {
+  // Quote independently of the connection's backslash-escape settings.
+  if (d.kind === 'mysql') {
+    if (value.includes('\\')) return `CONVERT(X'${Buffer.from(value).toString('hex')}' USING utf8mb4)`
+    return `'${value.replace(/'/g, "''")}'`
+  }
+  if (d.kind === 'postgres' && value.includes('\\')) {
+    return `E${d.literal(value.replace(/\\/g, '\\\\'))}`
+  }
+  return d.literal(value)
+}
+
+/** Builds a lookup query for a table with one primary-key column. */
+export function primaryKeyLookupSql(
+  d: SqlDialect, schema: string, table: string, value: string, columns: ColumnMeta[]
+): string {
+  const keys = columns.filter((column) => column.key === 'PRI')
+  if (keys.length !== 1) throw new Error('Row lookup requires a table with a single-column primary key')
+  const text = value.trim()
+  if (!text || text.includes('\u0000')) throw new Error('Enter a valid primary-key value after #')
+  const key = keys[0]
+  const integer = INTEGER_KEY_TYPE.test(key.type)
+  let literal: string
+  if (integer || DECIMAL_KEY_TYPE.test(key.type)) {
+    if (!(integer ? /^[+-]?\d+$/.test(text) : DECIMAL.test(text))) {
+      throw new Error(integer ? 'Enter an integer primary-key value after #' : 'Enter a numeric primary-key value after #')
+    }
+    // Keep numeric text intact so large integer keys never pass through a JS number.
+    literal = text
+  } else literal = lookupTextLiteral(d, text)
+  return `SELECT * FROM ${qualify(d, schema, table)} WHERE ${d.quote(key.name)} = ${literal};`
+}
+
 /** Normalized column facts used for validation (drivers map their catalogs onto this). */
 export interface ColumnMeta {
   name: string

@@ -1114,8 +1114,13 @@ body.resizing {
   padding: 14px;
   color: var(--muted);
 }
+.palette-lookup-error {
+  padding: 6px 12px;
+  color: var(--error);
+}
 .palette-footer {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 6px 12px;
   border-top: 1px solid var(--border);
@@ -1473,4 +1478,19 @@ button.node.procedure-node:hover:not(:disabled) {
   margin: 3px 0;
   border: 0;
   border-top: 1px solid var(--border);
+}
+
+.tree-database {
+  display: grid;
+  gap: 4px;
+  padding: 4px 8px 8px;
+  color: var(--muted);
+}
+.tree-database select {
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+}
+.schema-tree > .database-objects > li > ul {
+  padding-left: 6px;
 }

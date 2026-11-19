@@ -3,6 +3,7 @@ import type { MenuCommand } from '../shared/menuCommands'
 
 export function installApplicationMenu(window: BrowserWindow): void {
   const mac = process.platform === 'darwin'
+  const blockCommentShortcut = process.platform === 'linux' ? 'Ctrl+Shift+A' : 'Alt+Shift+A'
   const command = (id: MenuCommand, label: string, accelerator?: string, registerAccelerator = true): MenuItemConstructorOptions => ({
     id,
     label,
@@ -32,6 +33,9 @@ export function installApplicationMenu(window: BrowserWindow): void {
         { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
         { type: 'separator' },
+        command('toggle-line-comment', 'Toggle Line Comment', 'CommandOrControl+/', false),
+        command('toggle-block-comment', 'Toggle Block Comment', blockCommentShortcut, false),
+        { type: 'separator' },
         command('copy-csv', 'Copy as CSV'),
         command('copy-json', 'Copy as JSON'),
         command('copy-json-with-headers', 'Copy as JSON with Headers')
@@ -57,6 +61,7 @@ export function installApplicationMenu(window: BrowserWindow): void {
       label: 'View',
       submenu: [
         command('find-table', 'Find Table…', 'CommandOrControl+P', false),
+        command('refresh-table-data', 'Refresh Table Data', 'CommandOrControl+R', false),
         command('toggle-inspector', 'Toggle Value Inspector'),
         { type: 'separator' },
         { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }
@@ -76,8 +81,11 @@ export function installApplicationMenu(window: BrowserWindow): void {
               detail: [
                 `${mod}T    New query tab`,
                 `${mod}W    Close tab`,
-                `${mod}Enter    Run selection or statement`,
+                `${mod}Enter or F5    Run selection or statement in a query tab`,
+                `${mod}/    Toggle SQL line comment (${mod}Shift+7 on Finnish keyboards)`,
+                `${blockCommentShortcut}    Toggle SQL block comment`,
                 `${mod}P    Find table`,
+                `${mod}R or F5    Refresh table data`,
                 `${mod}I    Toggle Value Inspector outside the SQL editor`,
                 'Alt+Shift+Left or Right    Move focused tab',
                 'Shift+F10    Open the selected cell’s copy menu'

@@ -7,11 +7,13 @@ import { TableSchemaView } from './TableSchemaView'
 import { SqlPreviewModal } from './SqlPreviewModal'
 import { PendingBar, summarize } from './PendingBar'
 import { useRowEditing } from '../useRowEditing'
+import { useMenuActions } from '../menuActions'
 import type { EditTarget } from '../rowEditing'
 import { isEditableColumn, tableEditability } from '../../../shared/editing'
-import type { RowFilter, TableDataResult, TableDetails } from '../../../shared/types'
+import type { RowFilter, TableDataResult, TableDetails, TableSort } from '../../../shared/types'
 
 const PAGE_SIZE = 500
+const REFRESH_COMMANDS = ['refresh-table-data'] as const
 
 export type TableViewMode = 'data' | 'schema'
 
@@ -42,6 +44,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
   const [match, setMatch] = useState<'all' | 'any'>(initialFilter?.match ?? 'all')
   const [applied, setApplied] = useState<TableFilter>(() => initialFilter ?? { filters: [], match: 'all' })
   const [offset, setOffset] = useState(0)
+  const [sort, setSort] = useState<TableSort>()
   const [data, setData] = useState<TableDataResult | null>(null)
   const [dataError, setDataError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -58,7 +61,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
   const loadData = useCallback(async () => {
     const id = ++requestId.current
     setLoading(true)
-    const r = await window.api.tableData({ schema, table, ...applied, offset, limit: PAGE_SIZE })
+    const r = await window.api.tableData({ schema, table, ...applied, offset, limit: PAGE_SIZE, sort })
     if (id !== requestId.current) return // a newer request superseded this one
     setLoading(false)
     if (r.ok) {
@@ -70,7 +73,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
       setData(r.value)
       setDataError(null)
     } else setDataError(r.error)
-  }, [schema, table, applied, offset])
+  }, [schema, table, applied, offset, sort])
 
   useEffect(() => {
     void loadDetails()
@@ -96,6 +99,7 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
     void loadDetails()
     if (dataWanted) void loadData()
   }
+  useMenuActions(REFRESH_COMMANDS, view === 'data', refresh)
 
   // ---- Editing -------------------------------------------------------------
   // Staged changes are keyed by primary key, so they survive paging and refreshes.
@@ -214,6 +218,18 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
 
   const total = data?.total ?? 0
   const lastOffset = Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE)
+  const changeSort = (column: string): void => {
+    setSort((current) => {
+      if (current?.column !== column) return { column, direction: 'asc' }
+      if (current.direction === 'asc') return { column, direction: 'desc' }
+      return undefined
+    })
+    setOffset(0)
+  }
+  const clearSort = (): void => {
+    setSort(undefined)
+    setOffset(0)
+  }
 
   return (
     <div className="table-view">
@@ -274,7 +290,10 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
           />
           <div className="table-body">
             {dataError ? (
-              <pre className="error-panel">{dataError}</pre>
+              <div>
+                <pre className="error-panel">{dataError}</pre>
+                {sort && <button onClick={clearSort}>Clear sort</button>}
+              </div>
             ) : data ? (
               <ResultsGrid fields={data.fields} rows={displayRows} editing={editing} onSelectedRowsChange={setSelectedRows}
                 selectionResetKey={newRowCount}
@@ -282,6 +301,9 @@ export function TableView({ sqlite, schema, table, view, onViewChange, onEditSch
                 columnTypes={columnTypes}
                 describeRow={describeRow}
                 cellLinks={cellLinks}
+                sort={sort}
+                onSort={changeSort}
+                sortDisabled={loading || saving}
               />
             ) : (
               <div className="placeholder">Loading…</div>

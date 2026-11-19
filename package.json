@@ -3,7 +3,7 @@
   "productName": "Naskali",
   "version": "0.1.0",
   "license": "MIT",
-  "description": "Naskali – a SQL GUI proof of concept (Electron + Monaco + MySQL)",
+  "description": "A desktop SQL client for MySQL, PostgreSQL, SQL Server, and SQLite",
   "homepage": "https://example.com/naskali",
   "desktopName": "naskali.desktop",
   "main": "./out/main/index.js",

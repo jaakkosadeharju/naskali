@@ -6,20 +6,30 @@ import type { Driver } from './drivers/types'
 // Database-independent table operations on top of a Driver: paging/filtering
 // the data view, previewing and applying row changes.
 
-/** One page of a table's rows, filtered server-side (metadata connection). */
+/** One page of a table's rows, filtered and sorted server-side. */
 export async function tableData(driver: Driver, req: TableDataRequest): Promise<TableDataResult> {
   const d = driver.dialect
   const started = performance.now()
   const cols = await driver.columnMeta(req.schema, req.table)
   const where = buildWhere(d, req.filters, req.match, cols)
   const from = qualify(d, req.schema, req.table)
-  // Order by primary key so paging is stable.
-  const pk = cols.filter((c) => c.key === 'PRI').map((c) => d.quote(c.name))
+  const { sort } = req
+  const orderBy: string[] = []
+  if (sort) {
+    const column = cols.find((c) => c.name === sort.column)
+    if (!column) throw new Error(`Unknown column: ${sort.column}`)
+    if (sort.direction !== 'asc' && sort.direction !== 'desc') throw new Error('Invalid sort direction')
+    orderBy.push(`${d.quote(column.name)} ${sort.direction === 'asc' ? 'ASC' : 'DESC'}`)
+  }
+  // Break ties by primary key for stable paging.
+  for (const column of cols) {
+    if (column.key === 'PRI' && column.name !== sort?.column) orderBy.push(d.quote(column.name))
+  }
   const limit = Math.min(Math.max(1, Math.floor(req.limit)), 10_000)
   const offset = Math.max(0, Math.floor(req.offset))
 
   const count: Sql = { text: `SELECT COUNT(*) AS total FROM ${from}${where.text}`, params: where.params }
-  const select: Sql = { text: d.paginate(`SELECT * FROM ${from}${where.text}`, pk, limit, offset), params: where.params }
+  const select: Sql = { text: d.paginate(`SELECT * FROM ${from}${where.text}`, orderBy, limit, offset), params: where.params }
 
   const c = render(count, d)
   const total = Number((await driver.selectRows(c.text, c.params)).rows[0]?.[0] ?? 0)

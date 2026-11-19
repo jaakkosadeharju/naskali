@@ -6,6 +6,8 @@ import { createDriver } from './drivers'
 import { exportRows } from '../shared/exportRows'
 import type { Driver } from './drivers/types'
 import { applyChanges, previewChanges, tableData } from './session'
+import { QuerySessions } from './querySessions'
+import { primaryKeyLookupSql } from './tableQuery'
 import { changeTable, createTableSql } from './tableSchema'
 import { resultEditInfo } from './resultEditing'
 import { deleteConnection, listConnections, saveConnection } from './connectionStore'
@@ -17,9 +19,18 @@ import splashHtml from '../../resources/splash.html?asset'
 
 /** The connected database, if any. */
 let driver: Driver | null = null
+let querySessions: QuerySessions | null = null
 const requireDriver = (): Driver => {
   if (!driver) throw new Error('Not connected')
   return driver
+}
+
+async function disconnect(): Promise<void> {
+  const current = driver
+  const sessions = querySessions
+  driver = null
+  querySessions = null
+  await Promise.all([current?.disconnect(), sessions?.disconnect()])
 }
 
 /** Keep the splash up at least this long so it doesn't just flash by. */
@@ -117,11 +128,11 @@ function handle<A extends unknown[], T>(channel: string, fn: (...args: A) => Pro
 }
 
 handle('db:connect', async (cfg: ConnectionConfig) => {
-  await driver?.disconnect()
-  driver = null
+  await disconnect()
   const next = createDriver(cfg)
   const info = await next.connect()
   driver = next
+  querySessions = new QuerySessions(() => createDriver(cfg.driver === 'sqlite' ? { ...cfg, create: false } : cfg))
   return info
 })
 handle('db:testConnection', async (cfg: ConnectionConfig) => {
@@ -135,18 +146,14 @@ handle('db:testConnection', async (cfg: ConnectionConfig) => {
   }
   await probe.disconnect()
 })
-handle('db:disconnect', async () => {
-  await driver?.disconnect()
-  driver = null
-})
+handle('db:disconnect', disconnect)
 handle('db:listConnections', listConnections)
 handle('db:saveConnection', saveConnection)
 handle('db:deleteConnection', deleteConnection)
 handle('db:introspect', () => requireDriver().introspect())
-handle('db:query', async (sql: string) => {
-  const d = requireDriver()
-  const result = await d.query(sql)
-  return { result, schema: await d.currentSchema() }
+handle('db:query', async (tabId: string, sql: string) => {
+  if (!querySessions) throw new Error('Not connected')
+  return querySessions.query(tabId, sql)
 })
 handle('db:exportRows', async (format: ExportFormat, name: string, columns: string[], rows: CellValue[][]) => {
   if (format !== 'csv' && format !== 'json') throw new Error('Unsupported export format')
@@ -161,8 +168,12 @@ handle('db:exportRows', async (format: ExportFormat, name: string, columns: stri
   if (canceled || !filePath) return
   await writeFile(filePath, exportRows(format, columns, rows), 'utf8')
 })
-handle('db:cancel', () => requireDriver().cancel())
-handle('db:use', (name: string) => requireDriver().useSchema(name))
+handle('db:cancel', async (tabId: string) => querySessions?.cancel(tabId))
+handle('db:closeQueryTab', async (tabId: string) => querySessions?.close(tabId))
+handle('db:use', async (name: string) => {
+  await requireDriver().useSchema(name)
+  querySessions?.useSchema(name)
+})
 handle('db:pickSqliteFile', async () => {
   const win = BrowserWindow.getFocusedWindow()
   const options: Electron.OpenDialogOptions = {
@@ -204,6 +215,10 @@ handle('db:procedureDefinition', async (schema: string, name: string) => {
   if (!driver.procedureDefinition) throw new Error('Stored procedure definitions are unavailable for this connection')
   return driver.procedureDefinition(schema, name)
 })
+handle('db:primaryKeyLookup', async (schema: string, table: string, value: string) => {
+  const driver = requireDriver()
+  return primaryKeyLookupSql(driver.dialect, schema, table, value, await driver.columnMeta(schema, table))
+})
 handle('db:tableDetails', (schema: string, table: string) => requireDriver().tableDetails(schema, table))
 handle('db:tableData', (req: TableDataRequest) => tableData(requireDriver(), req))
 handle('db:previewChanges', (sets: ChangeSet[]) => previewChanges(requireDriver(), sets))
@@ -219,6 +234,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  void driver?.disconnect()
+  void disconnect().catch(() => {})
   if (process.platform !== 'darwin') app.quit()
 })
