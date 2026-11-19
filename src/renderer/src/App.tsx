@@ -852,7 +852,7 @@ export function App(): JSX.Element {
               disabled={!canControlTransaction}
               onClick={() => void changeTransaction(activeTab, 'begin')}
             >
-              Manual transaction
+              Open transaction
             </button>
           )}
           {activeTransaction && activeTab.kind === 'query' && (
