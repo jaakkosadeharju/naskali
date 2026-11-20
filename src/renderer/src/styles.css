@@ -1412,6 +1412,9 @@ kbd {
   max-height: calc(100vh - 40px);
   overflow: auto;
 }
+.table-designer:has(.designer-columns) {
+  width: min(860px, calc(100vw - 40px));
+}
 .table-designer:not([open]) {
   display: none;
 }
@@ -1440,6 +1443,10 @@ kbd {
   margin-top: 16px;
 }
 .designer-columns input:not([type='checkbox']) {
+  width: 100%;
+  min-width: 0;
+}
+.designer-columns select {
   width: 100%;
   min-width: 0;
 }
