@@ -98,7 +98,13 @@ at the end of [the SQLite seed](docker/seed.sqlite.sql).
 - **Table palette** – **Ctrl+P** (⌘P on macOS) from anywhere: fuzzy search in the current database (word-start acronyms like
   `oi` → `order_items`; type `schema.table` for a qualified search), recently opened tables first.
   Enter opens the Data view, Ctrl/⌘+Enter the Schema view, and Esc closes the palette. Enter `Table#id` to open and run a
-  lookup query for a table with a single-column primary key.
+  lookup query for a table with a single-column primary key. Enter `Table#column=value` to find all rows that match a
+  specific column (e.g. `TableA#item_id=whatever`). Type a partial column name after `#` and press Tab to complete the
+  selected suggestion, then type the value. When the palette identifies one table and column, it also suggests
+  `<=`, `<`, `>=`, `>`, `IS NULL`, and `IS NOT NULL`. Use the arrow keys and Tab to apply an operator, or type it
+  directly (e.g. `orders#total>=100` or `orders#shipped_at IS NULL`). After a date or timestamp comparison operator,
+  Tab can insert a shortcut such as Today, Yesterday, or Start of this month. Timestamp shortcuts insert midnight on
+  the selected local calendar date. With `=`, the Empty shortcut sets `IS NULL`.
 - Schema-aware autocomplete: tables, columns, `alias.` → columns, `db.` → tables
 - Save named connection profiles in the connection dialog. Select a profile to reconnect, edit it, or remove it. Each profile can set the workspace accent color. Passwords are stored only when OS-backed encryption is available (`safeStorage`).
 

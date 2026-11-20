@@ -7,7 +7,7 @@ import { exportRows } from '../shared/exportRows'
 import type { Driver } from './drivers/types'
 import { applyChanges, previewChanges, tableData } from './session'
 import { QuerySessions } from './querySessions'
-import { primaryKeyLookupSql } from './tableQuery'
+import { rowLookupSql } from './tableQuery'
 import { changeTable, createTableSql } from './tableSchema'
 import { resultEditInfo } from './resultEditing'
 import { deleteConnection, listConnections, saveConnection } from './connectionStore'
@@ -233,9 +233,9 @@ handle('db:procedureDefinition', async (schema: string, name: string) => {
   if (!driver.procedureDefinition) throw new Error('Stored procedure definitions are unavailable for this connection')
   return driver.procedureDefinition(schema, name)
 })
-handle('db:primaryKeyLookup', async (schema: string, table: string, value: string) => {
+handle('db:rowLookup', async (schema: string, table: string, expression: string) => {
   const driver = requireDriver()
-  return primaryKeyLookupSql(driver.dialect, schema, table, value, await driver.columnMeta(schema, table))
+  return rowLookupSql(driver.dialect, schema, table, expression, await driver.columnMeta(schema, table))
 })
 handle('db:tableDetails', (schema: string, table: string) => requireDriver().tableDetails(schema, table))
 handle('db:tableData', (req: TableDataRequest) => tableData(requireDriver(), req))

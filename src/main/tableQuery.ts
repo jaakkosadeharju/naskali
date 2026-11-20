@@ -1,5 +1,6 @@
 import { FILTER_OPS, type CellAssignment, type CellValue, type ChangeSet, type RowFilter } from '../shared/types'
 import { isEditableColumn, temporalCellKind } from '../shared/editing'
+import { splitRowLookup } from '../shared/rowLookup'
 import { bind, escapeLike, qualify, type Param, type Sql, type SqlDialect } from './dialect'
 
 // Turns UI filter rows into a parameterized WHERE clause, and change sets into
@@ -90,25 +91,38 @@ function lookupTextLiteral(d: SqlDialect, value: string): string {
   return d.literal(value)
 }
 
-/** Builds a lookup query for a table with one primary-key column. */
-export function primaryKeyLookupSql(
-  d: SqlDialect, schema: string, table: string, value: string, columns: ColumnMeta[]
+/** Builds a query from a primary-key value or an explicit column comparison. */
+export function rowLookupSql(
+  d: SqlDialect, schema: string, table: string, expression: string, columns: ColumnMeta[]
 ): string {
-  const keys = columns.filter((column) => column.key === 'PRI')
-  if (keys.length !== 1) throw new Error('Row lookup requires a table with a single-column primary key')
-  const text = value.trim()
-  if (!text || text.includes('\u0000')) throw new Error('Enter a valid primary-key value after #')
-  const key = keys[0]
+  const comparison = splitRowLookup(expression)
+  let key: ColumnMeta
+  if (!comparison) {
+    const keys = columns.filter((column) => column.key === 'PRI')
+    if (keys.length !== 1) throw new Error('Row lookup requires a table with a single-column primary key')
+    key = keys[0]
+  } else {
+    if (!comparison.column) throw new Error('Enter a column name before the operator')
+    const column = columns.find((column) => column.name === comparison.column)
+    if (!column) throw new Error(`Unknown column: ${comparison.column}`)
+    key = column
+  }
+  const operator = comparison?.operator ?? '='
+  const target = `SELECT * FROM ${qualify(d, schema, table)} WHERE ${d.quote(key.name)} ${operator}`
+  if (operator === 'IS NULL' || operator === 'IS NOT NULL') return `${target};`
+  const text = comparison?.value ?? expression.trim()
+  const valueLabel = comparison ? `lookup value after ${operator}` : 'primary-key value after #'
+  if (!text || text.includes('\u0000')) throw new Error(`Enter a valid ${valueLabel}`)
   const integer = INTEGER_KEY_TYPE.test(key.type)
   let literal: string
   if (integer || DECIMAL_KEY_TYPE.test(key.type)) {
     if (!(integer ? /^[+-]?\d+$/.test(text) : DECIMAL.test(text))) {
-      throw new Error(integer ? 'Enter an integer primary-key value after #' : 'Enter a numeric primary-key value after #')
+      throw new Error(`Enter ${integer ? 'an integer' : 'a numeric'} ${valueLabel}`)
     }
     // Keep numeric text intact so large integer keys never pass through a JS number.
     literal = text
   } else literal = lookupTextLiteral(d, text)
-  return `SELECT * FROM ${qualify(d, schema, table)} WHERE ${d.quote(key.name)} = ${literal};`
+  return `${target} ${literal};`
 }
 
 /** Normalized column facts used for validation (drivers map their catalogs onto this). */

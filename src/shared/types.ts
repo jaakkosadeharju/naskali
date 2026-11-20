@@ -317,7 +317,7 @@ export interface SqlApi {
   changeTable(action: TableAction): Promise<IpcResult<void>>
   procedureCall(schema: string, name: string): Promise<IpcResult<string>>
   procedureDefinition(schema: string, name: string): Promise<IpcResult<string>>
-  primaryKeyLookup(schema: string, table: string, value: string): Promise<IpcResult<string>>
+  rowLookup(schema: string, table: string, expression: string): Promise<IpcResult<string>>
   tableDetails(schema: string, table: string): Promise<IpcResult<TableDetails>>
   tableData(req: TableDataRequest): Promise<IpcResult<TableDataResult>>
   /** The statements `applyChanges` would run, with values inlined (for display). */

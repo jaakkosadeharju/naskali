@@ -1082,6 +1082,7 @@ export function App(): JSX.Element {
         {conn && paletteOpen && (
           <TablePalette
             schemas={visibleSchemas}
+            driver={conn.info.driver}
             currentDb={currentDb}
             recent={recentTables}
             favourites={favourites}
