@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Detect a stable version increase
+        id: version
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            PREVIOUS_PACKAGE=$(git show "$BEFORE:package.json")
+            export PREVIOUS_PACKAGE
+          fi
+          node scripts/release-version.mjs
+
+  package:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+            flags: --linux --x64
+            assets: |
+              dist/*.AppImage
+              dist/*.deb
+          - platform: windows
+            runner: windows-latest
+            flags: --win --x64
+            assets: dist/*.exe
+          - platform: macos
+            runner: macos-latest
+            flags: --mac --universal
+            assets: dist/*.dmg
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Package installer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx --no-install electron-builder ${{ matrix.flags }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.platform }}
+          path: ${{ matrix.assets }}
+          if-no-files-found: error
+
+  release:
+    needs: [version, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ needs.version.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: installer-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish installers and release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: bash scripts/publish-release.sh

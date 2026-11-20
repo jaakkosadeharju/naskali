@@ -37,6 +37,14 @@ npm run dev          # app with hot reload
 | `npm run db:up` / `db:up:mssql` / `db:down` | Start the MySQL + PostgreSQL / also SQL Server / stop all dev containers |
 | `npm run db:sqlite` | (Re)build `dev/shop.sqlite` |
 
+### Releases
+
+Bump the stable version with `npm version patch --no-git-tag-version` (or use `minor` or `major`), then commit the
+manifest and lockfile changes. When the bump reaches `master`, GitHub Actions tests and packages Linux x64
+(AppImage and DEB), Windows x64 (EXE), and macOS (universal DMG). After all three builds succeed, it publishes
+the installers and generated release notes under the corresponding `vX.Y.Z` tag. The workflow builds unsigned
+installers and can also be run manually from the Actions tab on `master` for the current version.
+
 The demo includes an `order_details` view on all four engines, plus a `line_total` function
 and a `customer_order_count` procedure on the three server engines. The explorer lists
 stored procedures on SQL Server.

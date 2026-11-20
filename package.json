@@ -1,8 +1,9 @@
 {
   "name": "naskali",
   "productName": "Naskali",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
+  "author": "Jaakko Sadeharju",
   "description": "A desktop SQL client for MySQL, PostgreSQL, SQL Server, and SQLite",
   "homepage": "https://example.com/naskali",
   "desktopName": "naskali.desktop",
