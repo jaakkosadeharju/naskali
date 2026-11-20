@@ -73,6 +73,8 @@ export interface NewTableColumn {
   type: string
   nullable: boolean
   primaryKey: boolean
+  autoIncrement?: boolean
+  defaultValue?: string
 }
 
 export interface CreateTableAction {
@@ -85,7 +87,7 @@ export interface CreateTableAction {
 
 export type TableAction =
   | CreateTableAction
-  | { kind: 'addColumn'; schema: string; table: string; column: Omit<NewTableColumn, 'primaryKey'> }
+  | { kind: 'addColumn'; schema: string; table: string; column: Omit<NewTableColumn, 'primaryKey' | 'autoIncrement'> }
   | { kind: 'renameColumn'; schema: string; table: string; column: string; name: string }
   | { kind: 'dropColumn'; schema: string; table: string; column: string }
   | { kind: 'drop' | 'truncate'; schema: string; table: string }
