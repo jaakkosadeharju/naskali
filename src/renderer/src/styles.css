@@ -53,7 +53,7 @@ body,
   display: grid;
   height: 100%;
   grid-template-columns: clamp(210px, 19vw, 270px) minmax(0, 1fr) auto;
-  grid-template-rows: 44px minmax(0, 1fr) 24px;
+  grid-template-rows: minmax(44px, auto) minmax(0, 1fr) 24px;
   grid-template-areas:
     'toolbar toolbar toolbar'
     'sidebar main inspector'
@@ -64,13 +64,27 @@ body,
   grid-area: toolbar;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 0 12px;
+  padding: 6px 12px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
 }
 .app[data-connection-color] .toolbar {
   border-bottom-color: var(--accent);
+}
+.query-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid var(--border);
+}
+.query-run-action {
+  min-inline-size: 76px;
+}
+.toolbar-inspector {
+  margin-inline-start: auto;
 }
 .spacer {
   flex: 1;
@@ -514,9 +528,20 @@ select {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
 }
 .transaction-actions > span {
   font-size: 12px;
+}
+.transaction-status {
+  color: var(--muted);
+  padding-inline: 2px;
+}
+.transaction-warning {
+  color: #ffe08a;
 }
 button.transaction-commit {
   color: #a7ebc2;

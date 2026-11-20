@@ -834,41 +834,43 @@ export function App(): JSX.Element {
       <div className={`app ${inspectorOpen ? 'with-inspector' : ''}`} data-connection-color={conn?.color}>
         <header className="toolbar">
           <button onClick={() => newQueryTab()} disabled={!conn || disconnecting}>+ New query</button>
-          {activeTab.kind === 'query' && conn && <button onClick={saveActiveQuery} disabled={!saveActiveQuery}>Save query…</button>}
-          <button
-            className="primary"
-            onClick={() => void execute(activeTab.id)}
-            disabled={!canRun}
-            title="Ctrl+Enter"
-          >
-            ▶ Run
-          </button>
-          <button onClick={() => void window.api.cancel(activeTab.id)} disabled={!activeQueryRunning}>
-            ■ Cancel
-          </button>
-          {activeTab.kind === 'query' && conn && !activeTransaction && (
-            <button
-              type="button"
-              disabled={!canControlTransaction}
-              onClick={() => void changeTransaction(activeTab, 'begin')}
-            >
-              Open transaction
-            </button>
+          {conn && activeTab.kind === 'query' && (
+            <>
+              <div className="query-toolbar-actions" role="group" aria-label="SQL query">
+                <button
+                  type="button"
+                  className={`query-run-action${activeQueryRunning ? '' : ' primary'}`}
+                  onClick={activeQueryRunning ? workspaceCommands['cancel-query'] : workspaceCommands['run-query']}
+                  disabled={!activeQueryRunning && !canRun}
+                  title={activeQueryRunning ? undefined : 'Ctrl+Enter'}
+                >
+                  {activeQueryRunning ? '■ Cancel' : '▶ Run'}
+                </button>
+                <button type="button" onClick={saveActiveQuery} disabled={!saveActiveQuery}>Save query…</button>
+              </div>
+              {activeTransaction ? (
+                <div className="transaction-actions" role="group" aria-label="Editor transaction">
+                  <span className="transaction-status">
+                    Transaction open · {activeTransaction.statements} {activeTransaction.statements === 1 ? 'statement' : 'statements'}
+                  </span>
+                  <button className="transaction-commit" type="button" disabled={!canControlTransaction || activeTransaction.rollbackOnly} onClick={() => void changeTransaction(activeTab, 'commit')}>Commit</button>
+                  <button className="transaction-rollback" type="button" disabled={!canControlTransaction} onClick={() => void changeTransaction(activeTab, 'rollback')}>Rollback</button>
+                  {activeTransaction.rollbackOnly && <span className="transaction-warning" role="status">Rollback required</span>}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={!canControlTransaction}
+                  onClick={() => void changeTransaction(activeTab, 'begin')}
+                >
+                  Open transaction
+                </button>
+              )}
+            </>
           )}
-          {activeTransaction && activeTab.kind === 'query' && (
-            <div className="transaction-actions" role="group" aria-label="Editor transaction">
-              <button className="transaction-commit" type="button" disabled={!canControlTransaction || activeTransaction.rollbackOnly} onClick={() => void changeTransaction(activeTab, 'commit')}>Commit</button>
-              <button className="transaction-rollback" type="button" disabled={!canControlTransaction} onClick={() => void changeTransaction(activeTab, 'rollback')}>Rollback</button>
-              <span className="muted">
-                {activeTransaction.statements} {activeTransaction.statements === 1 ? 'statement' : 'statements'}
-                {activeTransaction.rollbackOnly ? ' · Rollback required' : ''}
-              </span>
-            </div>
-          )}
-          <div className="spacer" />
           <button
             aria-pressed={inspectorOpen}
-            className={inspectorOpen ? 'active-toggle' : ''}
+            className={`toolbar-inspector${inspectorOpen ? ' active-toggle' : ''}`}
             onClick={() => setInspectorOpen((o) => !o)}
             title="Show the selected cell's value in a side panel (Ctrl+I)"
           >
