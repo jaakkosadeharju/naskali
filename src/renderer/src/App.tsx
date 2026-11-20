@@ -735,6 +735,10 @@ export function App(): JSX.Element {
     'refresh-schema': workspaceInteractive ? () => void refreshSchema() : undefined,
     'run-query': canRun ? () => void execute(activeTab.id) : undefined,
     'cancel-query': activeQueryRunning ? () => void window.api.cancel(activeTab.id) : undefined,
+    'open-transaction': canControlTransaction && !activeTransaction ? () => void changeTransaction(activeTab, 'begin') : undefined,
+    'commit-transaction': canControlTransaction && activeTransaction && !activeTransaction.rollbackOnly
+      ? () => void changeTransaction(activeTab, 'commit') : undefined,
+    'rollback-transaction': canControlTransaction && activeTransaction ? () => void changeTransaction(activeTab, 'rollback') : undefined,
     'toggle-line-comment': queryEditor ? () => toggleComment('editor.action.commentLine') : undefined,
     'toggle-block-comment': queryEditor ? () => toggleComment('editor.action.blockComment') : undefined,
     'find-table': workspaceReady && !designer && sqlToSave === null ? () => {
@@ -853,15 +857,15 @@ export function App(): JSX.Element {
                   <span className="transaction-status">
                     Transaction open · {activeTransaction.statements} {activeTransaction.statements === 1 ? 'statement' : 'statements'}
                   </span>
-                  <button className="transaction-commit" type="button" disabled={!canControlTransaction || activeTransaction.rollbackOnly} onClick={() => void changeTransaction(activeTab, 'commit')}>Commit</button>
-                  <button className="transaction-rollback" type="button" disabled={!canControlTransaction} onClick={() => void changeTransaction(activeTab, 'rollback')}>Rollback</button>
+                  <button className="transaction-commit" type="button" disabled={!workspaceCommands['commit-transaction']} onClick={workspaceCommands['commit-transaction']}>Commit</button>
+                  <button className="transaction-rollback" type="button" disabled={!workspaceCommands['rollback-transaction']} onClick={workspaceCommands['rollback-transaction']}>Rollback</button>
                   {activeTransaction.rollbackOnly && <span className="transaction-warning" role="status">Rollback required</span>}
                 </div>
               ) : (
                 <button
                   type="button"
-                  disabled={!canControlTransaction}
-                  onClick={() => void changeTransaction(activeTab, 'begin')}
+                  disabled={!workspaceCommands['open-transaction']}
+                  onClick={workspaceCommands['open-transaction']}
                 >
                   Open transaction
                 </button>

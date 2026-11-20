@@ -55,7 +55,11 @@ export function installApplicationMenu(window: BrowserWindow): void {
       label: 'Query',
       submenu: [
         command('run-query', 'Run Selection or Statement', 'CommandOrControl+Enter', false),
-        command('cancel-query', 'Cancel Running Query')
+        command('cancel-query', 'Cancel Running Query'),
+        { type: 'separator' },
+        command('open-transaction', 'Open Transaction'),
+        command('commit-transaction', 'Commit'),
+        command('rollback-transaction', 'Rollback')
       ]
     },
     {
