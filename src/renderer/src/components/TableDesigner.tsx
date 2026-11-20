@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { ColumnInfo, CreateTableAction, DriverKind, NewTableColumn, SchemaInfo, TableAction } from '../../../shared/types'
+import { addedColumnDefaultError } from '../../../shared/tableDefaults'
 
 export type DesignerRequest =
   | { kind: 'create'; schema: string }
@@ -197,11 +198,21 @@ function CreateTable({ schemas, driver, initialSchema, onApply, onClose, onOpenS
 
   const submit = async (showSql: boolean): Promise<void> => {
     setPreviewError(null)
+    const configured = columns.filter(hasColumnDetails)
+    if (!configured.length) {
+      setPreviewError('Add at least one column.')
+      return
+    }
     const action: CreateTableAction = {
       kind: 'create',
       schema,
       table: table.trim(),
-      columns: columns.filter(hasColumnDetails).map(({ id: _id, ...column }) => ({ ...column, name: column.name.trim() })),
+      columns: configured.map(({ id: _id, ...column }) => {
+        const name = column.name.trim()
+        return column.autoIncrement
+          ? { name, type: '', autoIncrement: true, primaryKey: true, nullable: false }
+          : { ...column, name }
+      }),
       foreignKeys: []
     }
     for (const fk of foreignKeys) {
@@ -269,9 +280,10 @@ function CreateTable({ schemas, driver, initialSchema, onApply, onClose, onOpenS
         <thead><tr><th>Column name</th><th>Type</th><th>Nullable</th><th>Primary key</th><th title={DEFAULT_HINT}>Default</th><th /></tr></thead>
         <tbody>
           {columns.map((column, index) => {
-            const required = index === 0 || hasColumnDetails(column)
+            const required = hasColumnDetails(column)
             const otherIdentity = columns.some((row) => row.id !== column.id && row.autoIncrement)
-            const otherPrimaryKey = columns.some((row) => row.id !== column.id && row.primaryKey)
+            const otherPrimaryKey = otherIdentity || columns.some((row) => row.id !== column.id && row.primaryKey)
+            const primaryKey = column.autoIncrement || column.primaryKey
             return (
               <tr key={column.id} onKeyDown={(event) => {
                 if (event.key !== 'Tab' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
@@ -286,12 +298,12 @@ function CreateTable({ schemas, driver, initialSchema, onApply, onClose, onOpenS
                 <td><ColumnTypeInput driver={driver} label={`Column ${index + 1} type`} value={column.type} required={required}
                   autoIncrement={column.autoIncrement} allowAutoIncrement={!otherPrimaryKey}
                   onChange={(type, autoIncrement) => update(column.id, autoIncrement
-                    ? { type, autoIncrement: true, primaryKey: true, nullable: false, defaultValue: '' }
+                    ? { autoIncrement: true }
                     : { type, autoIncrement: false })} /></td>
-                <td><input type="checkbox" aria-label={`Column ${index + 1} nullable`} disabled={column.primaryKey} checked={!column.primaryKey && column.nullable} onChange={(event) => update(column.id, { nullable: event.target.checked })} /></td>
-                <td><input type="checkbox" aria-label={`Column ${index + 1} primary key`} disabled={column.autoIncrement || otherIdentity} checked={column.primaryKey} onChange={(event) => update(column.id, { primaryKey: event.target.checked })} /></td>
+                <td><input type="checkbox" aria-label={`Column ${index + 1} nullable`} disabled={primaryKey} checked={!primaryKey && column.nullable} onChange={(event) => update(column.id, { nullable: event.target.checked })} /></td>
+                <td><input type="checkbox" aria-label={`Column ${index + 1} primary key`} disabled={column.autoIncrement || otherIdentity} checked={primaryKey} onChange={(event) => update(column.id, { primaryKey: event.target.checked })} /></td>
                 <td><input aria-label={`Column ${index + 1} default value`} title={DEFAULT_HINT} placeholder="None"
-                  disabled={column.autoIncrement} value={column.defaultValue ?? ''} onChange={(event) => update(column.id, { defaultValue: event.target.value })} /></td>
+                  disabled={column.autoIncrement} value={column.autoIncrement ? '' : column.defaultValue ?? ''} onChange={(event) => update(column.id, { defaultValue: event.target.value })} /></td>
                 <td><button type="button" aria-label={`Remove column ${index + 1}`} disabled={columns.length === 1} onClick={() => setColumns((rows) => rows.filter((row) => row.id !== column.id))}>×</button></td>
               </tr>
             )
@@ -370,10 +382,12 @@ function EditColumns({ driver, schema, table, columns, onApply, onClose }: FormA
   const [type, setType] = useState('')
   const [nullable, setNullable] = useState(true)
   const [defaultValue, setDefaultValue] = useState('')
+  const defaultError = kind === 'addColumn' ? addedColumnDefaultError(driver, defaultValue) : undefined
 
   return (
     <form onSubmit={(event) => {
       event.preventDefault()
+      if (defaultError) return
       if (kind === 'addColumn') void onApply({ kind, schema, table, column: { name: name.trim(), type, nullable, defaultValue } })
       else if (kind === 'renameColumn') void onApply({ kind, schema, table, column, name: name.trim() })
       else void onApply({ kind, schema, table, column })
@@ -402,14 +416,17 @@ function EditColumns({ driver, schema, table, columns, onApply, onClose }: FormA
         <label className="grow">{kind === 'addColumn' ? 'Column name' : 'New name'}<input required value={name} onChange={(event) => setName(event.target.value)} /></label>
         {kind === 'addColumn' && <div className="grow designer-type-field"><span>Type</span><ColumnTypeInput driver={driver} label="Type" value={type} onChange={setType} /></div>}
       </div>}
-      {kind === 'addColumn' && <label>Default value<input title={DEFAULT_HINT} placeholder="None" value={defaultValue}
-        onChange={(event) => setDefaultValue(event.target.value)} /></label>}
+      {kind === 'addColumn' && <label>Default value<input title={driver === 'sqlite' ? "Use a constant such as 0, 'pending', or NULL." : DEFAULT_HINT}
+        placeholder="None" value={defaultValue} aria-invalid={!!defaultError} aria-describedby={defaultError ? 'added-column-default-error' : undefined}
+        onChange={(event) => setDefaultValue(event.target.value)} />
+        {defaultError && <span id="added-column-default-error" className="error" role="alert">{defaultError}</span>}
+      </label>}
       {kind === 'addColumn' && <label className="check"><input type="checkbox" checked={nullable} onChange={(event) => setNullable(event.target.checked)} />Allow NULL</label>}
       {kind === 'dropColumn' && <p className="error">Dropping {column} permanently deletes the column and its data.</p>}
       <div className="dialog-actions">
         <div className="spacer" />
         <button type="button" onClick={onClose}>Cancel</button>
-        <button className={kind === 'dropColumn' ? 'danger' : 'primary'}>{COLUMN_OPERATIONS[kind]}</button>
+        <button className={kind === 'dropColumn' ? 'danger' : 'primary'} disabled={!!defaultError}>{COLUMN_OPERATIONS[kind]}</button>
       </div>
     </form>
   )

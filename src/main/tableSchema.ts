@@ -1,4 +1,5 @@
 import type { CreateTableAction, NewTableColumn, TableAction } from '../shared/types'
+import { addedColumnDefaultError } from '../shared/tableDefaults'
 import type { SqlDialect } from './dialect'
 import type { Driver } from './drivers/types'
 
@@ -96,9 +97,12 @@ export async function changeTable(driver: Driver, action: TableAction): Promise<
     case 'create':
       sql = createTableSql(d, action)
       break
-    case 'addColumn':
+    case 'addColumn': {
+      const defaultError = addedColumnDefaultError(d.kind, action.column.defaultValue)
+      if (defaultError) throw new Error(defaultError)
       sql = `ALTER TABLE ${target} ADD ${columnDefinition(d, action.column)}`
       break
+    }
     case 'renameColumn': {
       const column = quote(action.column)
       const name = quote(action.name)

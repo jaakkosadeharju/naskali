@@ -1,8 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
-import type { CreateTableAction } from '../../shared/types'
+import type { CreateTableAction, TableAction } from '../../shared/types'
 import { DIALECTS } from '../dialect'
-import { createTableSql } from '../tableSchema'
+import { changeTable, createTableSql } from '../tableSchema'
+import { fakeDriver, table } from './fakeDriver'
 
 const action: CreateTableAction = {
   kind: 'create',
@@ -49,5 +50,37 @@ describe('create table SQL', () => {
       ...action,
       columns: [{ ...action.columns[2], defaultValue: "'pending' CHECK (1)" }]
     })).toThrow('single-quoted string')
+  })
+})
+
+describe('add column defaults', () => {
+  const addColumn: TableAction = {
+    kind: 'addColumn',
+    schema: 'main',
+    table: 'events',
+    column: { name: 'created_at', type: 'DATETIME', nullable: true, defaultValue: ' current_timestamp ' }
+  }
+
+  it('rejects a non-constant default before executing an SQLite schema change', async () => {
+    const driver = fakeDriver([table('main', 'events', [])], 'sqlite')
+    await expect(changeTable(driver, addColumn)).rejects.toThrow('SQLite requires a constant default')
+    expect(driver.executed).toHaveLength(0)
+  })
+
+  it('adds a literal default to a populated SQLite table', async () => {
+    using db = new DatabaseSync(':memory:')
+    db.exec('CREATE TABLE events (id INTEGER PRIMARY KEY); INSERT INTO events DEFAULT VALUES')
+    const driver = fakeDriver([table('main', 'events', [])], 'sqlite')
+    await changeTable(driver, {
+      ...addColumn, column: { name: 'state', type: 'TEXT', nullable: false, defaultValue: "'pending'" }
+    })
+    db.exec(driver.executed[0].text)
+    expect(db.prepare('SELECT state FROM events').get()).toEqual({ state: 'pending' })
+  })
+
+  it('keeps the timestamp default available when adding a MySQL column', async () => {
+    const driver = fakeDriver([table('main', 'events', [])], 'mysql')
+    await changeTable(driver, addColumn)
+    expect(driver.executed[0].text).toContain('DEFAULT CURRENT_TIMESTAMP')
   })
 })
